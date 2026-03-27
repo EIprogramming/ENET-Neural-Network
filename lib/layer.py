@@ -42,6 +42,12 @@ class Layer:
         self.batch_outputs = np.zeros(0)
         self.batch_raw_outputs = np.zeros(0)
 
+        # for adam optimizer
+        self.weight_momenta = np.zeros_like(self.weights)
+        self.weight_variances = np.zeros_like(self.weights)
+        self.bias_momenta = np.zeros_like(self.biases)
+        self.bias_variances = np.zeros_like(self.biases)
+
         # activation methods
         self.activation_method = kwargs["activation_method"] if "activation_method" in kwargs else "sigmoid"
     
@@ -67,16 +73,12 @@ class Layer:
         return np.where(X > 0, 1, 0)
     
     def softmax(self, X: np.ndarray | float):
-        if type(X) == float:
-            curr_outputs = self.raw_outputs
-        else:
-            curr_outputs = self.batch_raw_outputs
         # source: https://stats.stackexchange.com/questions/304758/softmax-overflow
         # to prevent overflow, subtract by the maximum m = x_i
 
-        m = np.max(curr_outputs, axis=0)
-        
-        result = np.exp(X - m[np.newaxis, :])/np.sum(np.exp(curr_outputs - m[np.newaxis, :]), axis=0)
+        m = np.max(self.batch_raw_outputs, axis=0, keepdims=True)
+
+        result = np.exp(X - m)/np.sum(np.exp(self.batch_raw_outputs - m), axis=0)
 
         return result
 

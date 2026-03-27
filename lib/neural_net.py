@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 from layer import Layer
 
@@ -11,6 +13,7 @@ class NeuralNet:
         
         self.shape = layer_sizes
         self.random_state = kwargs["random_state"] if "random_state" in kwargs else None
+        self.rng = np.random.default_rng(self.random_state)
 
         self.layers: list[Layer] = []
         prev_layer_size = 0
@@ -69,96 +72,50 @@ class NeuralNet:
     def grad_softmax_CE(self, y_pred, y_exp):
         return y_pred - y_exp
 
-    def train_optimized(self, X: np.ndarray, y_exp: np.ndarray, epochs = 10, display=True, verbose=False):
-        epoch_losses = np.zeros(epochs)
-        momentum = 1
-        momentum_degree = 1 # the running count of momentum
-        prev_loss = 9999
-        prev_prev_loss = 9999
-        for epoch in range(epochs):
-            losses = []
-            direction = 1
-            Y_pred = []
-            for X_i, y_exp_i in zip(X, y_exp):
-                y_pred = self.process(X_i)
-                Y_pred.append(y_pred)
+    def momentum(self, gradient, prev_momentum, beta = 0.9):
+        # m = B * m_{t-1} + (1 - B) * dL/dw
+        return beta * prev_momentum + (1 - beta) * gradient
 
-                # backpropogation
-                for i in reversed(range(len(self.layers))): # TODO: fix this weird reversed loop
-                    # for each layer, starting from the last, go through each node and calculate the deltas
-                    #print("1")
-                    raw_output = self.layers[i].raw_outputs
-                    #print("2")
-                    if i == len(self.layers) - 1:
-                        if (self.layers[i].activation_method != "softmax"):
-                            delta_j = self.BCE_prime(y_pred, y_exp_i) * self.layers[i].activation_derivative(raw_output)
-                        else:
-                            delta_j = self.grad_softmax_CE(y_pred, y_exp_i)
-                        #print("3a")
-                        self.layers[i].deltas = delta_j
-                        #print("3b")
-                    else:
-                        sum_delta_l = np.sum(self.layers[i + 1].deltas)
-                        #print("4a")
-                        delta_j = sum_delta_l * self.layers[i].activation_derivative(raw_output)
-                        #print("4b")
-                        self.layers[i].deltas = delta_j
-                        #print("4c")
-                        
-                    #print("5")
-                    if i == 0:
-                        output_k = X_i
-                        #print("6a")
-                    else:
-                        output_k = self.layers[i - 1].outputs
-                        #print("7a")
-                    #print("8")
-                    #print("delta vs output:", delta_j[:, np.newaxis].shape, output_k[:, np.newaxis].shape)
-                    big_delta_weight = momentum * -self.learning_rate * (delta_j[:, np.newaxis] @ output_k[np.newaxis, :])
-                    #print("9")
-                    self.layers[i].weights += big_delta_weight
-                    #print("10")
-                    self.layers[i].biases -= self.learning_rate * delta_j
-                    #print("11")
-                loss = self.BCE(y_pred, y_exp_i)
-                #if (y_exp_i == 0 and epoch > 150 and epoch % 10 == 0 and y_pred > 0.5): print(y_pred, y_exp_i, loss)
-                losses.append(loss)
-            if (epoch == epochs - 1): print(self)
-            epoch_loss = np.mean(losses)
-            epoch_losses[epoch] = epoch_loss
-            greatest_momentum_since = 0
-            if prev_loss < epoch_loss and prev_prev_loss < epoch_loss:
-                greatest_momentum_since = momentum
-                momentum_degree *= 0.95
-                momentum = 0.5 if momentum > 1 else momentum_degree
-            elif momentum < 300:
-                momentum *= 1.02
-            prev_prev_loss = prev_loss
-            prev_loss = epoch_loss
-            if display and epoch % 1 == 0:
-                if verbose: print(f"EPOCH: {epoch}    LOSS: {epoch_loss}    MOMENTUM: {momentum}    GM: {greatest_momentum_since}    X_i = {X_i} y_pred = {y_pred}")
-                else: print(f"EPOCH: {epoch}    LOSS: {epoch_loss}    MOMENTUM: {momentum}")
-        return epoch_losses, np.array(Y_pred)
+    def RMSprop_variance(self, gradient, prev_variance, beta = 0.999):
+        return beta * prev_variance + (1 - beta) * gradient ** 2
 
-    def batch_train_optimized(self, X: np.ndarray, y_exp: np.ndarray, epochs = 10, batch_size=32, display=True, verbose=False):
+    def adam_optimize(self, n, gradient, prev_momentum, prev_variance, beta_1 = 0.9, beta_2 = 0.999, epsilon=1e-8):
+        # momentum / mean
+        first_moment = self.momentum(gradient, prev_momentum, beta_1)
+
+        # variance
+        second_moment = self.RMSprop_variance(gradient, prev_variance, beta_2)
+
+        first_moment_corrected = first_moment / (1 - beta_1**(n + 1))
+        second_moment_corrected = second_moment / (1 - beta_2**(n + 1))
+        optimized_loss = first_moment_corrected / (np.sqrt(second_moment_corrected) + epsilon)
+
+        return optimized_loss, first_moment, second_moment
+
+    def train(self, X: np.ndarray, y_exp: np.ndarray, epochs = 10, batch_size=32, display=True, verbose=False):
         epoch_losses = np.zeros(epochs)
-        momentum = 1
-        momentum_degree = 1 # the running count of momentum
-        prev_loss = 9999
-        prev_prev_loss = 9999
         for epoch in range(epochs):
+            TOTAL_TIMER_epoch = 0
+            TOTAL_TIMER_batch = 0
+            TOTAL_TIMER_backprop = 0
+            TOTAL_TIMER_backprop1 = 0
+            TIMER_epoch = time.time()
             losses = []
-            direction = 1
             Y_pred = []
-            # TODO: shuffle the batches
+            # TODO: shuffle the batches in the other batch train too
+            shuffled_indices = self.rng.permutation(X.shape[0])
+            X_shuffled = X[shuffled_indices]
+            y_exp_shuffled = y_exp[shuffled_indices]
             for batch_number in range(len(X)//batch_size):
-                X_i = X[batch_size * batch_number : batch_size * (batch_number + 1)]
-                y_exp_i = y_exp[batch_size * batch_number : batch_size * (batch_number + 1)].T
+                TIMER_batch = time.time()
+                X_i = X_shuffled[batch_size * batch_number : batch_size * (batch_number + 1)]
+                y_exp_i = y_exp_shuffled[batch_size * batch_number : batch_size * (batch_number + 1)].T
                 y_pred = self.batch_eval(X_i)
                 Y_pred.append(y_pred)
 
                 # backpropogation
                 for i in reversed(range(len(self.layers))): # TODO: fix this weird reversed loop
+                    TIMER_backprop = time.time()
                     # for each layer, starting from the last, go through each node and calculate the deltas
                     raw_output = self.layers[i].batch_raw_outputs
                     if i == len(self.layers) - 1:
@@ -172,14 +129,43 @@ class NeuralNet:
                         delta_j = sum_delta_l * self.layers[i].activation_derivative(raw_output)
                         self.layers[i].batch_deltas = delta_j
                     if i == 0:
-                        output_k = X_i.T
+                        output_k: np.ndarray = X_i.T
                     else:
-                        output_k = self.layers[i - 1].batch_outputs
-                    big_delta_weight = momentum * -self.learning_rate * np.mean(output_k[:, np.newaxis, :] * delta_j[np.newaxis, :, :], axis = -1).T
-                    self.layers[i].weights += big_delta_weight
-                    self.layers[i].biases -= self.learning_rate * np.mean(delta_j, axis=1) # TODO: multiply by learning rate?
+                        output_k: np.ndarray = self.layers[i - 1].batch_outputs
+
+                    TIMER_backprop1 = time.time()
+                    #print(output_k.shape, delta_j.shape)
+                    # update weights
+                    #grad_loss = np.mean(output_k[:, np.newaxis, :] * delta_j[np.newaxis, :, :], axis = -1).T
+                    #print(f"old shape: {grad_loss.shape}")
+                    grad_loss = (np.einsum('kb,jb->jk', output_k, delta_j) / output_k.shape[1])
+                    #print(f"new shape: {grad_loss.shape}")
+                    TOTAL_TIMER_backprop1 += time.time() - TIMER_backprop1
+                    weight_momenta = self.layers[i].weight_momenta
+                    weight_variances = self.layers[i].weight_variances
+                    optimized_loss, weight_momenta, weight_variances = self.adam_optimize(epoch, grad_loss, weight_momenta, weight_variances)
+                    weight_change = -self.learning_rate * optimized_loss
+                    self.layers[i].weights += -self.learning_rate * optimized_loss
+
+                    # update previous weight momenta / variances
+                    self.layers[i].weight_momenta = weight_momenta
+                    self.layers[i].weight_variances = weight_variances
+
+                    # update biases
+                    grad_bias = np.mean(delta_j, axis=1)
+                    bias_momenta = self.layers[i].bias_momenta
+                    bias_variances = self.layers[i].bias_variances
+                    optimized_delta, bias_momenta, bias_variances = self.adam_optimize(epoch, grad_bias, bias_momenta, bias_variances)
+                    self.layers[i].biases -= self.learning_rate * optimized_delta
+                
+                    # update previous bias momenta / variances
+                    self.layers[i].bias_momenta = bias_momenta
+                    self.layers[i].bias_variances = bias_variances
+
+                    TOTAL_TIMER_backprop += time.time() - TIMER_backprop
                 loss = self.BCE(y_pred, y_exp_i)
                 losses.append(loss)
+                TOTAL_TIMER_batch += time.time() - TIMER_batch
             
             # reshape Y_pred:
             Y_pred = np.array(Y_pred)
@@ -189,19 +175,14 @@ class NeuralNet:
             epoch_loss = np.mean(losses)
             epoch_losses[epoch] = epoch_loss
 
-            # process momentum
-            greatest_momentum_since = 0
-            if prev_loss < epoch_loss and prev_prev_loss < epoch_loss:
-                greatest_momentum_since = momentum
-                momentum_degree *= 0.75
-                momentum = momentum_degree if momentum > 1 else momentum_degree
-            else:
-                momentum *= 1.02
-            prev_prev_loss = prev_loss
-            prev_loss = epoch_loss
-           
             # display epoch
             if display and epoch % 1 == 0:
-                if verbose: print(f"EPOCH: {epoch}    LOSS: {epoch_loss}    MOMENTUM: {momentum}    GM: {greatest_momentum_since}    X_i = {X_i} y_pred = {y_pred}")
-                else: print(f"EPOCH: {epoch}    LOSS: {epoch_loss}    MOMENTUM: {momentum}")
+                if verbose: print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss}    Delta: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}")
+                else: print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss}    Delta: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}")
+            
+            TOTAL_TIMER_epoch += time.time() - TIMER_epoch
+            print(f"Timer backprop: {TOTAL_TIMER_backprop:.4g}")
+            print(f"Timer backprop1: {TOTAL_TIMER_backprop1:.4g}")
+            print(f"Timer batch: {TOTAL_TIMER_batch:.4g}")
+            print(f"Timer epoch: {TOTAL_TIMER_epoch:.4g}")
         return epoch_losses, np.array(Y_pred)
