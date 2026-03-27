@@ -65,12 +65,28 @@ class Layer:
     
     def ReLu_derivative(self, X: np.ndarray | float):
         return np.where(X > 0, 1, 0)
+    
+    def softmax(self, X: np.ndarray | float):
+        if type(X) == float:
+            curr_outputs = self.raw_outputs
+        else:
+            curr_outputs = self.batch_raw_outputs
+        # source: https://stats.stackexchange.com/questions/304758/softmax-overflow
+        # to prevent overflow, subtract by the maximum m = x_i
+
+        m = np.max(curr_outputs, axis=0)
+        
+        result = np.exp(X - m[np.newaxis, :])/np.sum(np.exp(curr_outputs - m[np.newaxis, :]), axis=0)
+
+        return result
 
     def activate(self, X: np.ndarray):
         if self.activation_method == "sigmoid":
             return self.sigmoid(X)
         elif self.activation_method == "ReLu":
             return self.ReLu(X)
+        elif self.activation_method == "softmax":
+            return self.softmax(X)
         else:
             return X
     
