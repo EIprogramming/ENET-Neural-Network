@@ -182,7 +182,7 @@ class NeuralNet:
                 greatest_momentum_since = momentum
                 momentum_degree *= 0.95
                 momentum = 0.5 if momentum > 1 else momentum_degree
-            else:
+            elif momentum < 300:
                 momentum *= 1.02
             prev_prev_loss = prev_loss
             prev_loss = epoch_loss
@@ -259,7 +259,7 @@ class NeuralNet:
             if prev_loss < epoch_loss and prev_prev_loss < epoch_loss:
                 greatest_momentum_since = momentum
                 momentum_degree *= 0.95
-                momentum /= 0.5 if momentum > 1 else momentum_degree
+                momentum = 1 if momentum > 1 else momentum_degree
             else:
                 momentum *= 1.02
             prev_prev_loss = prev_loss
