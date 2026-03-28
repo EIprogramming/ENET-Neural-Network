@@ -1,6 +1,7 @@
 import time
 
 import numpy as np
+from sklearn.metrics import accuracy_score
 from layer import Layer
 
 class NeuralNet:
@@ -92,8 +93,9 @@ class NeuralNet:
 
         return optimized_loss, first_moment, second_moment
 
-    def train(self, X: np.ndarray, y_exp: np.ndarray, epochs = 10, batch_size=32, display=True, verbose=False):
+    def train(self, X: np.ndarray, y_exp: np.ndarray, epochs = 10, batch_size=32, validate = None, display=True, verbose=False, **kwargs):
         epoch_losses = np.zeros(epochs)
+        prev_accuracy_train = 0
         for epoch in range(epochs):
             TOTAL_TIMER_epoch = 0
             TOTAL_TIMER_batch = 0
@@ -177,12 +179,24 @@ class NeuralNet:
 
             # display epoch
             if display and epoch % 1 == 0:
-                if verbose: print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss}    Delta: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}")
-                else: print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss}    Delta: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}")
+                if verbose: print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss}    LOSS CHANGE: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}")
+                else:
+                    if validate is not None and len(validate) == 2:
+                        X_test = validate[0]
+                        y_test = validate[1]
+                        y_test_pred = self.predict(X_test)
+                        if ("binary" in kwargs and kwargs["binary"] == True) or ("categorical" in kwargs and kwargs["categorical"] == True):
+                            y_test_pred = np.where(y_test_pred >= 0.5, 1, 0)
+                        accuracy_train = accuracy_score(y_test_pred, y_test)
+                        print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss:.6g}    LOSS CHANGE: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}" +
+                              f"    TEST ACCURACY: {accuracy_train:.3g}    TEST ACCURACY CHANGE: {accuracy_train - prev_accuracy_train:.3g}") # type:ignore
+                        prev_accuracy_train = accuracy_train
+                    else:
+                        print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss}    LOSS CHANGE: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}")
             
             TOTAL_TIMER_epoch += time.time() - TIMER_epoch
-            print(f"Timer backprop: {TOTAL_TIMER_backprop:.4g}")
-            print(f"Timer backprop1: {TOTAL_TIMER_backprop1:.4g}")
-            print(f"Timer batch: {TOTAL_TIMER_batch:.4g}")
-            print(f"Timer epoch: {TOTAL_TIMER_epoch:.4g}")
+            #print(f"Timer backprop: {TOTAL_TIMER_backprop:.4g}")
+            #print(f"Timer backprop1: {TOTAL_TIMER_backprop1:.4g}")
+            #print(f"Timer batch: {TOTAL_TIMER_batch:.4g}")
+            #print(f"Timer epoch: {TOTAL_TIMER_epoch:.4g}")
         return epoch_losses, np.array(Y_pred)

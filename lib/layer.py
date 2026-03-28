@@ -1,22 +1,31 @@
 import numpy as np
 
 class Layer:
-    def xavier_initialization(self):
-        mu = 0 # mean is 0 for Xavier_init
-        sigma = np.sqrt(6 / self.n_input + self.n_output)
+    # TODO: fix xavier init, it seems wrong...
+    def Xavier_initialization(self):
+        limit = np.sqrt(6 / (self.n_input + self.n_output))
 
-        return self.rng.normal(mu, sigma, size=self.shape)
+        return self.rng.uniform(-limit, limit, size=self.shape)
+    
+    def He_initialization(self):
+        limit = np.sqrt(6 / self.n_input)
+
+        return self.rng.uniform(-limit, limit, size=self.shape)
 
     def initialize(self, init_method: str="Xavier", **kwargs) -> np.ndarray:
         if init_method == "Xavier":
-            return self.xavier_initialization()
+            return self.Xavier_initialization()
+        elif init_method == "He":
+            return self.He_initialization()
         else:
+            print("No weight init specified...", init_method)
             return np.zeros(shape=self.shape)
 
     def bias_initialize(self, init_method: str=""):
         if init_method == "Zero":
             return np.zeros(shape=self.n_output)
         else:
+            print("No bias init specified...", init_method)
             return np.zeros(shape=self.n_output)
 
     def __init__(self, n_input: int, n_output: int, **kwargs):
@@ -32,7 +41,7 @@ class Layer:
         # initialize matrix values
         weight_init_method = kwargs["weight_init"] if "weight_init" in kwargs else "Xavier"
         self.weights = self.initialize(weight_init_method, **kwargs)
-        self.biases = self.bias_initialize()
+        self.biases = self.bias_initialize("Zero")
 
         # outputs required
         self.raw_outputs = np.zeros(n_output)
@@ -90,6 +99,7 @@ class Layer:
         elif self.activation_method == "softmax":
             return self.softmax(X)
         else:
+            print("No activation specified...")
             return X
     
     def activation_derivative(self, X: float | np.ndarray):
@@ -98,6 +108,7 @@ class Layer:
         elif self.activation_method == "ReLu":
             return self.ReLu_derivative(X)
         else:
+            print("No activation derivative specified...")
             return np.ones_like(X) # for default no activation function, derivative is 1
 
     def process(self, input: np.ndarray):
