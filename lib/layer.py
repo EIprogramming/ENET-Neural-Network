@@ -5,12 +5,12 @@ class Layer:
     def Xavier_initialization(self):
         limit = np.sqrt(6 / (self.n_input + self.n_output))
 
-        return self.rng.uniform(-limit, limit, size=self.shape)
+        return self.rng.uniform(-limit, limit, size=self.shape).astype(self.dtype)
     
     def He_initialization(self):
         limit = np.sqrt(6 / self.n_input)
 
-        return self.rng.uniform(-limit, limit, size=self.shape)
+        return self.rng.uniform(-limit, limit, size=self.shape).astype(self.dtype)
 
     def initialize(self, init_method: str="Xavier", **kwargs) -> np.ndarray:
         if init_method == "Xavier":
@@ -19,16 +19,24 @@ class Layer:
             return self.He_initialization()
         else:
             print("No weight init specified...", init_method)
-            return np.zeros(shape=self.shape)
+            return np.zeros(shape=self.shape, dtype=self.dtype)
 
     def bias_initialize(self, init_method: str=""):
         if init_method == "Zero":
-            return np.zeros(shape=self.n_output)
+            return np.zeros(shape=self.n_output, dtype=self.dtype)
         else:
             print("No bias init specified...", init_method)
-            return np.zeros(shape=self.n_output)
+            return np.zeros(shape=self.n_output, dtype=self.dtype)
+
+    def get_max_dtype(self, dtype):
+        return np.finfo(dtype).max if issubclass(dtype, np.floating) else np.iinfo(dtype).max
 
     def __init__(self, n_input: int, n_output: int, **kwargs):
+        # initialize data types
+        self.dtype = kwargs["dtype"] if "dtype" in kwargs else np.float64
+        self.dtype_max_value = np.finfo(self.dtype) 
+        self.sigmoid_clip_value = 0.9 * np.log(self.get_max_dtype(self.dtype))
+
         # initialize random state 
         self.random_state = kwargs["random_state"] if "random_state" in kwargs else None
         self.rng = np.random.default_rng(seed=self.random_state)
@@ -44,18 +52,18 @@ class Layer:
         self.biases = self.bias_initialize("Zero")
 
         # outputs required
-        self.raw_outputs = np.zeros(n_output)
-        self.outputs = np.zeros(n_output)
-        self.deltas = np.zeros(n_output)
-        self.batch_deltas: np.ndarray = np.zeros(0) # initialized in training to fit training data size
-        self.batch_outputs = np.zeros(0)
-        self.batch_raw_outputs = np.zeros(0)
+        self.raw_outputs = np.zeros(n_output, dtype=self.dtype)
+        self.outputs = np.zeros(n_output, dtype=self.dtype)
+        self.deltas = np.zeros(n_output, dtype=self.dtype)
+        self.batch_deltas: np.ndarray = np.zeros(0, dtype=self.dtype) # initialized in training to fit training data size
+        self.batch_outputs = np.zeros(0, dtype=self.dtype)
+        self.batch_raw_outputs = np.zeros(0, dtype=self.dtype)
 
         # for adam optimizer
-        self.weight_momenta = np.zeros_like(self.weights)
-        self.weight_variances = np.zeros_like(self.weights)
-        self.bias_momenta = np.zeros_like(self.biases)
-        self.bias_variances = np.zeros_like(self.biases)
+        self.weight_momenta = np.zeros_like(self.weights, dtype=self.dtype)
+        self.weight_variances = np.zeros_like(self.weights, dtype=self.dtype)
+        self.bias_momenta = np.zeros_like(self.biases, dtype=self.dtype)
+        self.bias_variances = np.zeros_like(self.biases, dtype=self.dtype)
 
         # activation methods
         self.activation_method = kwargs["activation_method"] if "activation_method" in kwargs else "sigmoid"
@@ -73,7 +81,7 @@ class Layer:
         return str(self) + "\n"
 
     def sigmoid(self, X: np.ndarray | float):
-        return 1 / (1 + np.exp(-X))
+        return 1 / (1 + np.exp(-np.clip(X, -self.sigmoid_clip_value, self.sigmoid_clip_value)))
 
     def ReLu(self, X: np.ndarray | float):
         return np.where(X > 0, X, 0)
@@ -109,7 +117,7 @@ class Layer:
             return self.ReLu_derivative(X)
         else:
             print("No activation derivative specified...")
-            return np.ones_like(X) # for default no activation function, derivative is 1
+            return np.ones_like(X, dtype=self.dtype) # for default no activation function, derivative is 1
 
     def process(self, input: np.ndarray):
         if (input.shape[0] != (self.n_input)):

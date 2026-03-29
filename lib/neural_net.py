@@ -8,6 +8,8 @@ class NeuralNet:
     def __init__(self, layer_sizes: tuple, learning_rate: float = 0.01, **kwargs):
         if len(layer_sizes) < 2:
             raise ValueError(f"Shape must have at least two layers")
+        # data type
+        self.dtype = kwargs["dtype"] if "dtype" in kwargs else np.float64
 
         # learning params
         self.learning_rate = learning_rate
@@ -22,7 +24,7 @@ class NeuralNet:
             if (index == 0):
                 prev_layer_size = layer_size
                 continue # skip the input layer (we already take inputs as they are)
-            self.layers.append(Layer(prev_layer_size, layer_size, random_state=self.random_state))
+            self.layers.append(Layer(prev_layer_size, layer_size, dtype=self.dtype, random_state=self.random_state))
             prev_layer_size = layer_size
     
     def __str__(self):
@@ -52,7 +54,7 @@ class NeuralNet:
         outputs = []
         for i in range(len(inputs)):
             outputs.append(self.process(inputs[i]))
-        return np.array(outputs)
+        return np.array(outputs, dtype=self.dtype)
 
     def BCE(self, y_pred_all: np.ndarray, y_exp_all: np.ndarray):
         n: int = len(y_pred_all)
@@ -94,6 +96,10 @@ class NeuralNet:
         return optimized_loss, first_moment, second_moment
 
     def train(self, X: np.ndarray, y_exp: np.ndarray, epochs = 10, batch_size=32, validate = None, display=True, verbose=False, **kwargs):
+        # cast data types:
+        X = X.astype(self.dtype)
+        y_exp = y_exp.astype(self.dtype)
+        
         epoch_losses = np.zeros(epochs)
         prev_accuracy_train = 0
         for epoch in range(epochs):
@@ -101,13 +107,16 @@ class NeuralNet:
             TOTAL_TIMER_batch = 0
             TOTAL_TIMER_backprop = 0
             TOTAL_TIMER_backprop1 = 0
+            TOTAL_TIMER_1 = 0
             TIMER_epoch = time.time()
             losses = []
             Y_pred = []
             # TODO: shuffle the batches in the other batch train too
+            TIMER_1 = time.time()
             shuffled_indices = self.rng.permutation(X.shape[0])
             X_shuffled = X[shuffled_indices]
             y_exp_shuffled = y_exp[shuffled_indices]
+            TOTAL_TIMER_1 += time.time() - TIMER_1
             for batch_number in range(len(X)//batch_size):
                 TIMER_batch = time.time()
                 X_i = X_shuffled[batch_size * batch_number : batch_size * (batch_number + 1)]
@@ -136,17 +145,12 @@ class NeuralNet:
                         output_k: np.ndarray = self.layers[i - 1].batch_outputs
 
                     TIMER_backprop1 = time.time()
-                    #print(output_k.shape, delta_j.shape)
                     # update weights
-                    #grad_loss = np.mean(output_k[:, np.newaxis, :] * delta_j[np.newaxis, :, :], axis = -1).T
-                    #print(f"old shape: {grad_loss.shape}")
-                    grad_loss = (np.einsum('kb,jb->jk', output_k, delta_j) / output_k.shape[1])
-                    #print(f"new shape: {grad_loss.shape}")
+                    grad_loss = (np.einsum('kb,jb->jk', output_k, delta_j, optimize=True) / output_k.shape[1])
                     TOTAL_TIMER_backprop1 += time.time() - TIMER_backprop1
                     weight_momenta = self.layers[i].weight_momenta
                     weight_variances = self.layers[i].weight_variances
                     optimized_loss, weight_momenta, weight_variances = self.adam_optimize(epoch, grad_loss, weight_momenta, weight_variances)
-                    weight_change = -self.learning_rate * optimized_loss
                     self.layers[i].weights += -self.learning_rate * optimized_loss
 
                     # update previous weight momenta / variances
@@ -170,7 +174,7 @@ class NeuralNet:
                 TOTAL_TIMER_batch += time.time() - TIMER_batch
             
             # reshape Y_pred:
-            Y_pred = np.array(Y_pred)
+            Y_pred = np.array(Y_pred, dtype=self.dtype)
             Y_pred = np.concatenate(Y_pred, axis=-1)
 
             # calculate loss
@@ -195,8 +199,9 @@ class NeuralNet:
                         print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss}    LOSS CHANGE: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}")
             
             TOTAL_TIMER_epoch += time.time() - TIMER_epoch
-            #print(f"Timer backprop: {TOTAL_TIMER_backprop:.4g}")
-            #print(f"Timer backprop1: {TOTAL_TIMER_backprop1:.4g}")
-            #print(f"Timer batch: {TOTAL_TIMER_batch:.4g}")
-            #print(f"Timer epoch: {TOTAL_TIMER_epoch:.4g}")
+            print(f"Timer backprop: {TOTAL_TIMER_backprop:.4g}")
+            print(f"Timer backprop1: {TOTAL_TIMER_backprop1:.4g}")
+            print(f"Timer batch: {TOTAL_TIMER_batch:.4g}")
+            print(f"Timer epoch: {TOTAL_TIMER_epoch:.4g}")
+            print(f"Timer 1: {TOTAL_TIMER_1:.4g}")
         return epoch_losses, np.array(Y_pred)
