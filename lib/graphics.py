@@ -27,7 +27,7 @@ def plot_report(neural_net: NeuralNet):
     ax2 = ax1.twinx()
 
     ax2.plot(epochs_list, accuracy, 'firebrick', label='Accuracy')
-    ax2.set_ylim(0, 1)
+    #ax2.set_ylim(0, 1)
     ax2.set_ylabel('Accuracy', color='firebrick')
     ax2.tick_params('y', colors='firebrick')
     

@@ -4,6 +4,7 @@ import time
 import numpy as np
 from sklearn.metrics import accuracy_score
 from layer import Layer
+import h5py
 
 class NeuralNet:
     def __init__(self, layer_sizes: tuple, learning_rate: float = 0.01, **kwargs):
@@ -24,7 +25,6 @@ class NeuralNet:
         self.learning_rate = learning_rate
         self.loss_method = kwargs["loss_method"] if "loss_method" in kwargs else ""
         
-        self.shape = layer_sizes
         self.random_state = kwargs["random_state"] if "random_state" in kwargs else None
         self.rng = np.random.default_rng(self.random_state)
 
@@ -113,14 +113,51 @@ class NeuralNet:
         }
 
     def export(self, filename):
-        if filename[-4:] != ".csv":
-            raise ValueError("File must be in csv")
-        with open(filename, 'w') as file:
-            writer = csv.writer(file)
-            for layer in self.layers:
-                writer.writerow(layer.weights.tolist())
+        if filename[-3:] != ".h5":
+            raise ValueError("File must be in .h5")
+        
+        with h5py.File(filename, 'w') as file:
+            for index, layer in enumerate(self.layers):
+                group = file.create_group(f"layer{index}")
+                group.create_dataset("weights", data=layer.weights)
+                group.create_dataset("biases", data=layer.biases)
+                group.attrs["activation"] = layer.activation_method
         
         print(f"Neural Network exported to {filename}")
+    
+    def load(self, filename):
+        if filename[-3:] != ".h5":
+            raise ValueError("File must be in .h5")
+
+        with h5py.File(filename, 'r') as file:
+            for index, layer in enumerate(self.layers):
+                layer.weights = np.array(file[f"layer{index}/weights"])
+                layer.biases = np.array(file[f"layer{index}/biases"])
+                layer.activation_method = file[f"layer{index}"].attrs["activation"]
+                print(layer.weights.shape, layer.activation_method)
+
+    def print_epoch_report(self, epoch, epoch_loss, epoch_losses, accuracy_train, prev_accuracy_train):
+        str_epoch = f"EPOCH: {epoch + 1}"
+        str_loss = f"LOSS: {epoch_loss:6g}"
+        loss_change = epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0
+        if loss_change < 0:
+            str_loss_change = f"LOSS CHANGE: \033[1;34m{loss_change:.4g}\033[0m"
+        elif loss_change == 0:
+            str_loss_change = f"LOSS CHANGE: {loss_change:.4g}"
+        else:
+            str_loss_change = f"LOSS CHANGE: \033[1;31m{loss_change:.4g}\033[0m"
+
+        str_accuracy_train = f"TEST ACCURACY: {accuracy_train:.4g}"
+
+        accuracy_change = accuracy_train - prev_accuracy_train
+        if accuracy_change > 0:
+            str_accuracy_change = f"TEST ACCURACY CHANGE \033[1;32m{accuracy_change:.4g}\033[0m"
+        elif accuracy_change == 0:
+            str_accuracy_change = f"TEST ACCURACY CHANGE {accuracy_change:.4g}"
+        else:
+            str_accuracy_change = f"TEST ACCURACY CHANGE \033[1;31m{accuracy_change:.4g}\033[0m"
+
+        print(str_epoch, str_loss, str_loss_change, str_accuracy_train, str_accuracy_change, sep="    ")
 
     def train(self, X: np.ndarray, y_exp: np.ndarray, epochs = 10, batch_size=32, validate = None,
               display=True, verbose=False, lr_scheduling = False, **kwargs):
@@ -251,10 +288,11 @@ class NeuralNet:
                         y_test_pred = self.predict(X_test)
                         if ("binary" in kwargs and kwargs["binary"] == True) or ("categorical" in kwargs and kwargs["categorical"] == True):
                             y_test_pred = np.where(y_test_pred >= 0.5, 1, 0)
+                            if (y_test.shape != y_test_pred.shape):
+                                y_test_pred = np.argmax(y_test_pred, axis = -1)
                         accuracy_train = accuracy_score(y_test_pred, y_test)
                         self.report["accuracy"][epoch] = accuracy_train
-                        print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss:.6g}    LOSS CHANGE: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}" +
-                              f"    TEST ACCURACY: {accuracy_train:.3g}    TEST ACCURACY CHANGE: {accuracy_train - prev_accuracy_train:.3g}") # type:ignore
+                        self.print_epoch_report(epoch, epoch_loss, epoch_losses, accuracy_train, prev_accuracy_train)
                         prev_accuracy_train = accuracy_train
                     else:
                         
