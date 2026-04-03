@@ -10,7 +10,7 @@ class Layer:
     def He_initialization(self):
         mu = 0
         sigma = np.sqrt(2 / self.n_input)
-
+        
         return self.rng.normal(mu, sigma, size=self.shape).astype(self.dtype)
 
     def initialize(self, init_method: str="Xavier", **kwargs) -> np.ndarray:

@@ -22,6 +22,7 @@ class NeuralNet:
 
         # learning params
         self.learning_rate = learning_rate
+        self.loss_method = kwargs["loss_method"] if "loss_method" in kwargs else ""
         
         self.shape = layer_sizes
         self.random_state = kwargs["random_state"] if "random_state" in kwargs else None
@@ -141,7 +142,7 @@ class NeuralNet:
         # for adam optimization
         adam_t = 0
         initial_learning_rate = self.learning_rate
-        lr_k = 0.000000230/batch_size
+        lr_k = 0.000000230/batch_size # learning rate decay constant
 
         for epoch in range(epochs):
             #TOTAL_TIMER_epoch = 0
@@ -189,8 +190,9 @@ class NeuralNet:
                             delta_j = self.BCE_prime(y_pred, y_exp_i) * self.layers[i].activation_derivative(raw_output)
                         self.layers[i].batch_deltas = delta_j
                     else:
-                        sum_delta_l = np.sum(self.layers[i + 1].batch_deltas)
-                        delta_j = sum_delta_l * self.layers[i].activation_derivative(raw_output)
+                        # sum along the weights and the previous deltas along their respective axes
+                        sum_delta_weights = np.einsum('ij,ik->jk', self.layers[i + 1].weights, self.layers[i + 1].batch_deltas, optimize=True)
+                        delta_j = sum_delta_weights * self.layers[i].activation_derivative(raw_output)
                         self.layers[i].batch_deltas = delta_j
                     if i == 0:
                         output_k: np.ndarray = X_i.T
@@ -255,7 +257,8 @@ class NeuralNet:
                               f"    TEST ACCURACY: {accuracy_train:.3g}    TEST ACCURACY CHANGE: {accuracy_train - prev_accuracy_train:.3g}") # type:ignore
                         prev_accuracy_train = accuracy_train
                     else:
-                        print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss}    LOSS CHANGE: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}")
+                        
+                        if epoch % 20 == 0: print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss}    LOSS CHANGE: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}")
 
             #TOTAL_TIMER_epoch += time.time() - TIMER_epoch
             #print(f"Timer backprop: {TOTAL_TIMER_backprop:.4g}")
