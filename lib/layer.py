@@ -8,9 +8,10 @@ class Layer:
         return self.rng.uniform(-limit, limit, size=self.shape).astype(self.dtype)
     
     def He_initialization(self):
-        limit = np.sqrt(6 / self.n_input)
+        mu = 0
+        sigma = np.sqrt(2 / self.n_input)
 
-        return self.rng.uniform(-limit, limit, size=self.shape).astype(self.dtype)
+        return self.rng.normal(mu, sigma, size=self.shape).astype(self.dtype)
 
     def initialize(self, init_method: str="Xavier", **kwargs) -> np.ndarray:
         if init_method == "Xavier":
@@ -49,7 +50,9 @@ class Layer:
         # initialize matrix values
         weight_init_method = kwargs["weight_init"] if "weight_init" in kwargs else "Xavier"
         self.weights = self.initialize(weight_init_method, **kwargs)
+        #self.weight_mask = np.ones_like(self.weights)
         self.biases = self.bias_initialize("Zero")
+        #self.bias_mask = np.ones_like(self.biases)
 
         # outputs required
         self.raw_outputs = np.zeros(n_output, dtype=self.dtype)
@@ -106,6 +109,8 @@ class Layer:
             return self.ReLu(X)
         elif self.activation_method == "softmax":
             return self.softmax(X)
+        elif self.activation_method == "logit":
+            return X
         else:
             print("No activation specified...")
             return X
@@ -115,20 +120,34 @@ class Layer:
             return self.sigmoid(X) * (1 - self.sigmoid(X))
         elif self.activation_method == "ReLu":
             return self.ReLu_derivative(X)
+        elif self.activation_method == "logit":
+            return np.ones_like(X, dtype=self.dtype)
         else:
             print("No activation derivative specified...")
             return np.ones_like(X, dtype=self.dtype) # for default no activation function, derivative is 1
 
-    def process(self, input: np.ndarray):
+    def process(self, input: np.ndarray, mask=False):
         if (input.shape[0] != (self.n_input)):
             raise ValueError(f"Input shape ({input.shape}, n) must equal layer input shape ({self.shape})")
         
-        self.raw_outputs = self.weights @ input + self.biases
-        self.outputs = self.activate(self.raw_outputs)
+        if mask:
+            weight_mask = self.rng.choice([0, 1], size=self.weights.shape, p=[0.1, 0.9])
+            bias_mask = self.rng.choice([0, 1], size=self.biases.shape, p=[0.1, 0.9])
+            self.raw_outputs = (weight_mask * self.weights) @ input + (bias_mask * self.biases)
+            self.outputs = self.activate(self.raw_outputs)
+        else:
+            self.raw_outputs = self.weights @ input + self.biases
+            self.outputs = self.activate(self.raw_outputs)
 
         return self.outputs
 
-    def batch_process(self, input: np.ndarray):
-        self.batch_raw_outputs = self.weights @ input + self.biases[:, np.newaxis]
-        self.batch_outputs = self.activate(self.batch_raw_outputs)
+    def batch_process(self, input: np.ndarray, mask=False):
+        if mask:
+            weight_mask = self.rng.choice([0, 1], size=self.weights.shape, p=[0.1, 0.9])
+            bias_mask = self.rng.choice([0, 1], size=self.biases.shape, p=[0.1, 0.9])
+            self.batch_raw_outputs = (weight_mask * self.weights) @ input + (bias_mask * self.biases)[:, np.newaxis]
+            self.batch_outputs = self.activate(self.batch_raw_outputs)
+        else:
+            self.batch_raw_outputs = self.weights @ input + self.biases[:, np.newaxis]
+            self.batch_outputs = self.activate(self.batch_raw_outputs)
         return self.batch_outputs
