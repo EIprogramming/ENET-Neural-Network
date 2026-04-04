@@ -96,9 +96,10 @@ class Layer:
         # source: https://stats.stackexchange.com/questions/304758/softmax-overflow
         # to prevent overflow, subtract by the maximum m = x_i
 
-        m = np.max(self.batch_raw_outputs, axis=0, keepdims=True)
+        m = np.max(self.batch_raw_outputs, axis=1, keepdims=True)
 
-        result = np.exp(X - m)/np.sum(np.exp(self.batch_raw_outputs - m), axis=0)
+        result = np.exp(X - m)/np.sum(np.exp(self.batch_raw_outputs - m), axis=-1)[:, np.newaxis]
+
 
         return result
 
@@ -145,9 +146,10 @@ class Layer:
         if mask:
             weight_mask = self.rng.choice([0, 1], size=self.weights.shape, p=[0.1, 0.9])
             bias_mask = self.rng.choice([0, 1], size=self.biases.shape, p=[0.1, 0.9])
-            self.batch_raw_outputs = (weight_mask * self.weights) @ input + (bias_mask * self.biases)[:, np.newaxis]
+            self.batch_raw_outputs = (weight_mask * self.weights) @ input.T + (bias_mask * self.biases)[:, np.newaxis]
             self.batch_outputs = self.activate(self.batch_raw_outputs)
         else:
-            self.batch_raw_outputs = self.weights @ input + self.biases[:, np.newaxis]
+            self.batch_raw_outputs = (self.weights @ input.T + self.biases[:, np.newaxis]).T
+            #print(self.weights.shape, input.T.shape, self.biases[:, np.newaxis].shape, self.batch_raw_outputs.shape)
             self.batch_outputs = self.activate(self.batch_raw_outputs)
         return self.batch_outputs

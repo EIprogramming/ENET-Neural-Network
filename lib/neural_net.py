@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 from sklearn.metrics import accuracy_score
 from layer import Layer
@@ -107,14 +109,14 @@ class NeuralNet:
         return current_inputs
 
     def batch_eval(self, inputs: np.ndarray, mask=False):
-        current_inputs = inputs.T # shape (2000, 2 becomes) (2, 2000)
+        current_inputs = inputs
         for layer in self.layers:
             current_inputs = layer.batch_process(current_inputs, mask)
         return current_inputs
 
     # TODO: fix transform issues
     def predict(self, inputs: np.ndarray):
-        return self.batch_eval(inputs).T
+        return self.batch_eval(inputs)
     
     def eval(self, inputs: np.ndarray, mask=False):
         outputs = []
@@ -123,16 +125,7 @@ class NeuralNet:
         return np.array(outputs, dtype=self.dtype)
 
     def BCE(self, y_pred_all: np.ndarray, y_exp_all: np.ndarray):
-        n: int = len(y_pred_all)
-        epsilon = 1e-8
-        loss_BCE = 0
-
-        for y_pred, y_exp in zip(y_pred_all, y_exp_all):
-            loss_BCE += y_exp * np.log(y_pred + epsilon) + (1 - y_exp) * np.log(1 - y_pred + epsilon)
-
-        loss_BCE *= - 1 / n
-
-        return loss_BCE
+        return self.CE(y_pred_all, y_exp_all)
 
     def BCE_prime(self, y_pred, y_exp):
         epsilon = 1e-8
@@ -215,7 +208,7 @@ class NeuralNet:
                 layer.activation_method = file[f"layer{index}"].attrs["activation"]
                 print(layer.weights.shape, layer.activation_method)
 
-    def print_epoch_report(self, epoch, epoch_loss, epoch_losses, accuracy_train, prev_accuracy_train):
+    def print_epoch_report(self, epoch, epoch_loss, epoch_losses, accuracy_train, prev_accuracy_train, epoch_time):
         str_epoch = f"EPOCH: {epoch + 1}"
         str_loss = f"LOSS: {epoch_loss:6g}"
         loss_change = epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0
@@ -236,8 +229,10 @@ class NeuralNet:
             str_accuracy_change = f"TEST ACCURACY CHANGE {accuracy_change:.4g}"
         else:
             str_accuracy_change = f"TEST ACCURACY CHANGE \033[1;31m{accuracy_change:.4g}\033[0m"
+        
+        str_epoch_time = f"TIME: {epoch_time:.2g} s"
 
-        print(str_epoch, str_loss, str_loss_change, str_accuracy_train, str_accuracy_change, sep="    ")
+        print(str_epoch, str_loss, str_loss_change, str_accuracy_train, str_accuracy_change, str_epoch_time, sep="    ")
 
     def train(self, X: np.ndarray, y_exp: np.ndarray, epochs = 10, batch_size=32, validate = None,
               display=True, lr_scheduling = False, **kwargs):
@@ -263,6 +258,7 @@ class NeuralNet:
         lr_k = 0.000000230/batch_size # learning rate decay constant
 
         for epoch in range(epochs):
+            TIMER_epoch = time.time()
             losses = []
             Y_pred = []
             shuffled_indices_epoch = shuffled_indices[epoch]
@@ -270,17 +266,22 @@ class NeuralNet:
             y_exp_shuffled = y_exp[shuffled_indices_epoch]
             
             for batch_number in range(len(X_shuffled)//batch_size):
+                #print("11")
                 #TIMER_batch = time.time()
                 X_i = X_shuffled[batch_size * batch_number : batch_size * (batch_number + 1)]
                 if noise_normalize:
                     mu, sigma = 0.05, 0.05
                     X_i += self.rng.normal(mu, sigma, size=X_i.shape).clip(0, 1)
                     #X_i += 0.05*self.rng.random(X_i.shape)
-                y_exp_i = y_exp_shuffled[batch_size * batch_number : batch_size * (batch_number + 1)].T
+                y_exp_i = y_exp_shuffled[batch_size * batch_number : batch_size * (batch_number + 1)]
+                #print("1", y_exp_i.shape)
                 y_pred = self.batch_eval(X_i, mask=dropout)
+                #print("pred:", y_pred)
+                #print("2", y_pred.shape)
                 #TIMER_1 = time.time()
                 Y_pred.append(y_pred)
                 #TOTAL_TIMER_1 += time.time() - TIMER_1
+
 
                 adam_t += 1
 
@@ -296,30 +297,37 @@ class NeuralNet:
                             delta_j = self.loss_derivative(y_pred, y_exp_i) * self.layers[i].activation_derivative(raw_output)
                         self.layers[i].batch_deltas = delta_j
                     else:
+                        #print("6:", self.layers[i + 1].weights.shape, self.layers[i + 1].batch_deltas.shape)
                         # sum along the weights and the previous deltas along their respective axes
-                        sum_delta_weights = np.einsum('ij,ik->jk', self.layers[i + 1].weights, self.layers[i + 1].batch_deltas, optimize=True)
+                        #print(self.layers[i + 1].weights.shape, "vsss.", self.layers[i + 1].batch_deltas.shape)
+                        sum_delta_weights = np.einsum('ij,ki->kj', self.layers[i + 1].weights, self.layers[i + 1].batch_deltas, optimize=True)
+                        #sum_delta_weights = self.layers[i + 1].batch_deltas @ self.layers[i + 1].weights
                         delta_j = sum_delta_weights * self.layers[i].activation_derivative(raw_output)
                         self.layers[i].batch_deltas = delta_j
                     if i == 0:
-                        output_k: np.ndarray = X_i.T
+                        output_k: np.ndarray = X_i
                     else:
                         output_k: np.ndarray = self.layers[i - 1].batch_outputs
 
+                    #print("3:", output_k.shape, delta_j.shape)
+
                     #TIMER_backprop1 = time.time()
                     # update weights
-                    grad_loss = (np.einsum('kb,jb->jk', output_k, delta_j, optimize=True) / output_k.shape[1])
+                    grad_loss = (np.einsum('bk,bj->jk', output_k, delta_j, optimize=True) / output_k.shape[0])
+                    #print("4:", grad_loss.shape, "vs.", self.layers[i].weights.shape)
                     #TOTAL_TIMER_backprop1 += time.time() - TIMER_backprop1
                     weight_momenta = self.layers[i].weight_momenta
                     weight_variances = self.layers[i].weight_variances
                     optimized_loss, weight_momenta, weight_variances = self.adam_optimize(adam_t, grad_loss, weight_momenta, weight_variances)
                     self.layers[i].weights += -self.learning_rate * optimized_loss
+                    
 
                     # update previous weight momenta / variances
                     self.layers[i].weight_momenta = weight_momenta
                     self.layers[i].weight_variances = weight_variances
-
                     # update biases
-                    grad_bias = np.mean(delta_j, axis=1)
+                    grad_bias = np.mean(delta_j, axis=0)
+                    #print("5:", grad_bias.shape, "vs", self.layers[i].biases.shape)
                     bias_momenta = self.layers[i].bias_momenta
                     bias_variances = self.layers[i].bias_variances
                     optimized_delta, bias_momenta, bias_variances = self.adam_optimize(adam_t, grad_bias, bias_momenta, bias_variances)
@@ -329,6 +337,7 @@ class NeuralNet:
                     self.layers[i].bias_momenta = bias_momenta
                     self.layers[i].bias_variances = bias_variances
 
+
                     if lr_scheduling:
                         self.learning_rate = initial_learning_rate * np.exp(- lr_k * adam_t)
 
@@ -337,6 +346,8 @@ class NeuralNet:
                 losses.append(loss)
                 #TOTAL_TIMER_batch += time.time() - TIMER_batch
             
+            TIMER_epoch = time.time() - TIMER_epoch
+
             # reshape Y_pred:
             Y_pred = np.array(Y_pred, dtype=self.dtype)
             Y_pred = np.concatenate(Y_pred, axis=-1)
@@ -346,7 +357,6 @@ class NeuralNet:
             epoch_losses[epoch] = epoch_loss
             
             self.report["loss"][epoch] = epoch_loss
-
             # display epoch
             if display and epoch % 1 == 0:
                 if validate is not None and len(validate) == 2:
@@ -355,11 +365,9 @@ class NeuralNet:
                     y_test_pred = self.predict(X_test)
                     if ("binary" in kwargs and kwargs["binary"] == True) or ("categorical" in kwargs and kwargs["categorical"] == True):
                         y_test_pred = np.where(y_test_pred >= 0.5, 1, 0)
-                        if (y_test.shape != y_test_pred.shape and not "binary" in kwargs and kwargs["binary"] == True):
-                            y_test_pred = np.argmax(y_test_pred, axis = -1)
                     accuracy_train = accuracy_score(y_test_pred, y_test)
                     self.report["accuracy"][epoch] = accuracy_train
-                    self.print_epoch_report(epoch, epoch_loss, epoch_losses, accuracy_train, prev_accuracy_train)
+                    self.print_epoch_report(epoch, epoch_loss, epoch_losses, accuracy_train, prev_accuracy_train, TIMER_epoch)
                     prev_accuracy_train = accuracy_train
                 else:
                     if epoch % 20 == 0: print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss}    LOSS CHANGE: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}")
