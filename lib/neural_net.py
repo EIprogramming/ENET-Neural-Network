@@ -164,15 +164,22 @@ class NeuralNet:
     def RMSprop_variance(self, gradient, prev_variance, beta = 0.999):
         return beta * prev_variance + (1 - beta) * gradient ** 2
 
-    def adam_optimize(self, n, gradient, prev_momentum, prev_variance, beta_1 = 0.9, beta_2 = 0.999, epsilon=1e-8):
+    def adam_optimize(self, t, gradient, prev_momentum, prev_variance, beta_1 = 0.9, beta_2 = 0.999, epsilon=1e-8):
         # momentum / mean
+        #print(gradient.shape, prev_momentum.shape, prev_variance.shape)
+        #print(gradient.flags)
+        #print(prev_momentum.flags)
+        #print(prev_variance.flags)
         first_moment = self.momentum(gradient, prev_momentum, beta_1)
 
         # variance
         second_moment = self.RMSprop_variance(gradient, prev_variance, beta_2)
 
-        first_moment_corrected = first_moment / (1 - beta_1**(n + 1))
-        second_moment_corrected = second_moment / (1 - beta_2**(n + 1))
+        #step_size = 1 / (1 - beta_1**t)
+        #bias_correction2 = (1 - beta_2**t) ** 0.5
+
+        first_moment_corrected = first_moment / (1 - beta_1**(t + 1))
+        second_moment_corrected = second_moment / (1 - beta_2**(t + 1))
         optimized_loss = first_moment_corrected / (np.sqrt(second_moment_corrected) + epsilon)
 
         return optimized_loss, first_moment, second_moment
@@ -262,18 +269,19 @@ class NeuralNet:
             losses = []
             Y_pred = []
             shuffled_indices_epoch = shuffled_indices[epoch]
-            X_shuffled = X[shuffled_indices_epoch]
-            y_exp_shuffled = y_exp[shuffled_indices_epoch]
+            X = X[shuffled_indices_epoch]
+            y_exp = y_exp[shuffled_indices_epoch]
             
-            for batch_number in range(len(X_shuffled)//batch_size):
+            for batch_number in range(len(X)//batch_size):
                 #print("11")
                 #TIMER_batch = time.time()
-                X_i = X_shuffled[batch_size * batch_number : batch_size * (batch_number + 1)]
+                # slice a batch of the shuffled X
+                X_i = X[batch_size * batch_number : batch_size * (batch_number + 1)]
                 if noise_normalize:
                     mu, sigma = 0.05, 0.05
                     X_i += self.rng.normal(mu, sigma, size=X_i.shape).clip(0, 1)
                     #X_i += 0.05*self.rng.random(X_i.shape)
-                y_exp_i = y_exp_shuffled[batch_size * batch_number : batch_size * (batch_number + 1)]
+                y_exp_i = y_exp[batch_size * batch_number : batch_size * (batch_number + 1)]
                 #print("1", y_exp_i.shape)
                 y_pred = self.batch_eval(X_i, mask=dropout)
                 #print("pred:", y_pred)
@@ -297,11 +305,8 @@ class NeuralNet:
                             delta_j = self.loss_derivative(y_pred, y_exp_i) * self.layers[i].activation_derivative(raw_output)
                         self.layers[i].batch_deltas = delta_j
                     else:
-                        #print("6:", self.layers[i + 1].weights.shape, self.layers[i + 1].batch_deltas.shape)
                         # sum along the weights and the previous deltas along their respective axes
-                        #print(self.layers[i + 1].weights.shape, "vsss.", self.layers[i + 1].batch_deltas.shape)
-                        sum_delta_weights = np.einsum('ij,ki->kj', self.layers[i + 1].weights, self.layers[i + 1].batch_deltas, optimize=True)
-                        #sum_delta_weights = self.layers[i + 1].batch_deltas @ self.layers[i + 1].weights
+                        sum_delta_weights = self.layers[i + 1].batch_deltas @ self.layers[i + 1].weights
                         delta_j = sum_delta_weights * self.layers[i].activation_derivative(raw_output)
                         self.layers[i].batch_deltas = delta_j
                     if i == 0:
@@ -309,35 +314,34 @@ class NeuralNet:
                     else:
                         output_k: np.ndarray = self.layers[i - 1].batch_outputs
 
-                    #print("3:", output_k.shape, delta_j.shape)
-
-                    #TIMER_backprop1 = time.time()
                     # update weights
-                    grad_loss = (np.einsum('bk,bj->jk', output_k, delta_j, optimize=True) / output_k.shape[0])
-                    #print("4:", grad_loss.shape, "vs.", self.layers[i].weights.shape)
-                    #TOTAL_TIMER_backprop1 += time.time() - TIMER_backprop1
-                    weight_momenta = self.layers[i].weight_momenta
-                    weight_variances = self.layers[i].weight_variances
-                    optimized_loss, weight_momenta, weight_variances = self.adam_optimize(adam_t, grad_loss, weight_momenta, weight_variances)
-                    self.layers[i].weights += -self.learning_rate * optimized_loss
-                    
+                    weight_decay = 0.01
+                    grad_loss = delta_j.T @ output_k / output_k.shape[0]
+                    optimized_loss, \
+                        self.layers[i].weight_momenta, \
+                        self.layers[i].weight_variances = self.adam_optimize(adam_t,
+                                                                             grad_loss,
+                                                                             self.layers[i].weight_momenta,
+                                                                             self.layers[i].weight_variances)
 
-                    # update previous weight momenta / variances
-                    self.layers[i].weight_momenta = weight_momenta
-                    self.layers[i].weight_variances = weight_variances
+                    # update weights in place
+                    self.layers[i].weights *= (1 - self.learning_rate * weight_decay)
+                    self.layers[i].weights -= self.learning_rate * optimized_loss
+                    
                     # update biases
                     grad_bias = np.mean(delta_j, axis=0)
-                    #print("5:", grad_bias.shape, "vs", self.layers[i].biases.shape)
-                    bias_momenta = self.layers[i].bias_momenta
-                    bias_variances = self.layers[i].bias_variances
-                    optimized_delta, bias_momenta, bias_variances = self.adam_optimize(adam_t, grad_bias, bias_momenta, bias_variances)
+                    optimized_delta, \
+                        self.layers[i].bias_momenta, \
+                        self.layers[i].bias_variances = self.adam_optimize(adam_t, 
+                                                                           grad_bias, 
+                                                                           self.layers[i].bias_momenta,
+                                                                           self.layers[i].bias_variances)
+                    
+                    # update biases in place
+                    self.layers[i].biases *= (1 - self.learning_rate * weight_decay)
                     self.layers[i].biases -= self.learning_rate * optimized_delta
+                    #self.layers[i].biases -= self.learning_rate * (optimized_delta + weight_decay*self.layers[i].biases)
                 
-                    # update previous bias momenta / variances
-                    self.layers[i].bias_momenta = bias_momenta
-                    self.layers[i].bias_variances = bias_variances
-
-
                     if lr_scheduling:
                         self.learning_rate = initial_learning_rate * np.exp(- lr_k * adam_t)
 

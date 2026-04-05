@@ -144,9 +144,9 @@ class Layer:
 
     def batch_process(self, input: np.ndarray, mask=False):
         if mask:
-            weight_mask = self.rng.choice([0, 1], size=self.weights.shape, p=[0.1, 0.9])
-            bias_mask = self.rng.choice([0, 1], size=self.biases.shape, p=[0.1, 0.9])
-            self.batch_raw_outputs = (weight_mask * self.weights) @ input.T + (bias_mask * self.biases)[:, np.newaxis]
+            # randomly turns off some neurons
+            dropout_mask = self.rng.choice([0, 1], size=self.weights.shape[0], p=[0.05, 0.95])
+            self.batch_raw_outputs = ((dropout_mask[:, np.newaxis] * self.weights) @ input.T + (dropout_mask * self.biases)[:, np.newaxis]).T
             self.batch_outputs = self.activate(self.batch_raw_outputs)
         else:
             self.batch_raw_outputs = (self.weights @ input.T + self.biases[:, np.newaxis]).T
