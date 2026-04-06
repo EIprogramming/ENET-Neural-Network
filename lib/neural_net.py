@@ -22,7 +22,7 @@ class NeuralNet:
         loss_method : { "CE", "BCE", "MSE" }, optional
             The method used to calculate loss. Default is "CE".
 
-        random_state : int or None, optional
+        random_state : {int or None}, optional
             The random state of the random number generator. Default is None (seed generated from operating system).
 
         dtype : optional
