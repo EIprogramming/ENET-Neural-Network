@@ -87,7 +87,8 @@ class NeuralNet:
                 case "InputND":
                     layers.append(InputND(layer_shape))
                 case "Convolutional":
-                    layers.append(Convolutional(layer_shape))
+                    #layers.append(Convolutional(layer_shape, 2, 3, 2, 1))
+                    ... # TODO: add convolutional back to Layer inheritance
                 case _:
                     raise ValueError(f"Invalid layer type {new_layer.layer_type}")
             prev_layer_shape = layer_shape
