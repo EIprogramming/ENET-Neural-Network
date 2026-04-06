@@ -1,7 +1,6 @@
 import numpy as np
 
 class Layer:
-    # TODO: fix xavier init, it seems wrong...
     def Xavier_initialization(self):
         limit = np.sqrt(6 / (self.n_input + self.n_output))
 
@@ -50,17 +49,12 @@ class Layer:
         # initialize matrix values
         weight_init_method = kwargs["weight_init"] if "weight_init" in kwargs else "Xavier"
         self.weights = self.initialize(weight_init_method, **kwargs)
-        #self.weight_mask = np.ones_like(self.weights)
         self.biases = self.bias_initialize("Zero")
-        #self.bias_mask = np.ones_like(self.biases)
 
         # outputs required
-        self.raw_outputs = np.zeros(n_output, dtype=self.dtype)
-        self.outputs = np.zeros(n_output, dtype=self.dtype)
-        self.deltas = np.zeros(n_output, dtype=self.dtype)
-        self.batch_deltas: np.ndarray = np.zeros(0, dtype=self.dtype) # initialized in training to fit training data size
-        self.batch_outputs = np.zeros(0, dtype=self.dtype)
-        self.batch_raw_outputs = np.zeros(0, dtype=self.dtype)
+        self.deltas: np.ndarray = np.zeros(0, dtype=self.dtype) # initialized in training to fit training data size
+        self.outputs = np.zeros(0, dtype=self.dtype)
+        self.raw_outputs = np.zeros(0, dtype=self.dtype)
 
         # for adam optimizer
         self.weight_momenta = np.zeros_like(self.weights, dtype=self.dtype)
@@ -96,10 +90,9 @@ class Layer:
         # source: https://stats.stackexchange.com/questions/304758/softmax-overflow
         # to prevent overflow, subtract by the maximum m = x_i
 
-        m = np.max(self.batch_raw_outputs, axis=1, keepdims=True)
+        m = np.max(self.raw_outputs, axis=1, keepdims=True)
 
-        result = np.exp(X - m)/np.sum(np.exp(self.batch_raw_outputs - m), axis=-1)[:, np.newaxis]
-
+        result = np.exp(X - m)/np.sum(np.exp(self.raw_outputs - m), axis=-1)[:, np.newaxis]
 
         return result
 
@@ -111,6 +104,8 @@ class Layer:
         elif self.activation_method == "softmax":
             return self.softmax(X)
         elif self.activation_method == "logit":
+            return X
+        elif self.activation_method == "None":
             return X
         else:
             print("No activation specified...")
@@ -128,28 +123,5 @@ class Layer:
             return np.ones_like(X, dtype=self.dtype) # for default no activation function, derivative is 1
 
     def process(self, input: np.ndarray, mask=False):
-        if (input.shape[0] != (self.n_input)):
-            raise ValueError(f"Input shape ({input.shape}, n) must equal layer input shape ({self.shape})")
-        
-        if mask:
-            weight_mask = self.rng.choice([0, 1], size=self.weights.shape, p=[0.1, 0.9])
-            bias_mask = self.rng.choice([0, 1], size=self.biases.shape, p=[0.1, 0.9])
-            self.raw_outputs = (weight_mask * self.weights) @ input + (bias_mask * self.biases)
-            self.outputs = self.activate(self.raw_outputs)
-        else:
-            self.raw_outputs = self.weights @ input + self.biases
-            self.outputs = self.activate(self.raw_outputs)
+        raise NotImplementedError # abstract base class ()
 
-        return self.outputs
-
-    def batch_process(self, input: np.ndarray, mask=False):
-        if mask:
-            # randomly turns off some neurons
-            dropout_mask = self.rng.choice([0, 1], size=self.weights.shape[0], p=[0.05, 0.95])
-            self.batch_raw_outputs = ((dropout_mask[:, np.newaxis] * self.weights) @ input.T + (dropout_mask * self.biases)[:, np.newaxis]).T
-            self.batch_outputs = self.activate(self.batch_raw_outputs)
-        else:
-            self.batch_raw_outputs = (self.weights @ input.T + self.biases[:, np.newaxis]).T
-            #print(self.weights.shape, input.T.shape, self.biases[:, np.newaxis].shape, self.batch_raw_outputs.shape)
-            self.batch_outputs = self.activate(self.batch_raw_outputs)
-        return self.batch_outputs

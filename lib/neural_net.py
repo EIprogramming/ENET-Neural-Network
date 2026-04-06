@@ -2,11 +2,17 @@ import time
 
 import numpy as np
 from sklearn.metrics import accuracy_score
-from layer import Layer
+from layers.layer import Layer
+from layers.convolutional import Convolutional
+from layers.dense import Dense
+from layers.input import Input
+from layers.input_nd import InputND
+from layers.layer import Layer
+from layers.new_layer import NewLayer
 import h5py
 
 class NeuralNet:
-    def __init__(self, layer_sizes: tuple, learning_rate: float = 0.01, **kwargs):
+    def __init__(self, layers: list[NewLayer], learning_rate: float = 0.01, **kwargs): # TODO: refactor docstring
         """Initialize a neural network object.
 
         Parameters
@@ -34,8 +40,8 @@ class NeuralNet:
         >>> NeuralNet((28**2, 256, 10)) # initialize a network with size 784 input layer, 256 hidden layer, and 10 output layer
         >>> NeuralNet((2, 16, 2), learning_rate = 0.005, loss_method = "MSE", random_state=42, dtype=np.float32)
         """
-        if len(layer_sizes) < 2:
-            raise ValueError(f"Shape must have at least two layers")
+        if len(layers) < 2:
+            raise ValueError(f"Neural Network must have an input and output layer.")
         
         # data type
         self.dtype = kwargs["dtype"] if "dtype" in kwargs else np.float64
@@ -54,7 +60,7 @@ class NeuralNet:
         self.random_state = kwargs["random_state"] if "random_state" in kwargs else None
         self.rng = np.random.default_rng(self.random_state)
 
-        self.layers: list[Layer] = self.create_layers(layer_sizes)
+        self.layers: list[Layer] = self.create_layers(layers)
 
         # initialize math
         self.loss = self.CE
@@ -67,16 +73,24 @@ class NeuralNet:
         for layer in reversed(self.layers):
             self_str += str(layer) + "\n"
         return self_str
-    
-    def create_layers(self, layer_sizes) -> list[Layer]:
+
+    def create_layers(self, new_layers: list[NewLayer]) -> list[Layer]:
         layers: list[Layer] = []
-        prev_layer_size = 0
-        for index, layer_size in enumerate(layer_sizes):
-            if (index == 0):
-                prev_layer_size = layer_size
-                continue # skip the input layer (we already take inputs as they are)
-            layers.append(Layer(prev_layer_size, layer_size, dtype=self.dtype, random_state=self.random_state))
-            prev_layer_size = layer_size
+        prev_layer_shape: tuple = ()
+        for new_layer in new_layers:
+            layer_shape = new_layer.shape
+            match new_layer.layer_type:
+                case "Dense":
+                    layers.append(Dense(prev_layer_shape[0], layer_shape[0], dtype=self.dtype, random_state=self.random_state))
+                case "Input":
+                    pass # we dont need to specify an input layer in this case
+                case "InputND":
+                    layers.append(InputND(layer_shape))
+                case "Convolutional":
+                    layers.append(Convolutional(layer_shape))
+                case _:
+                    raise ValueError(f"Invalid layer type {new_layer.layer_type}")
+            prev_layer_shape = layer_shape
         return layers
 
     def set_loss(self, loss_method):
@@ -100,29 +114,12 @@ class NeuralNet:
                 self.loss_derivative = self.MSE_prime
             case _:
                 raise ValueError(f"loss_method must be 'CE', 'BCE', or 'MSE', got {loss_method}")
-    
-    def process(self, inputs: np.ndarray, mask=False):
+
+    def predict(self, inputs: np.ndarray, mask=False):
         current_inputs = inputs
         for layer in self.layers:
             current_inputs = layer.process(current_inputs, mask)
-        
         return current_inputs
-
-    def batch_eval(self, inputs: np.ndarray, mask=False):
-        current_inputs = inputs
-        for layer in self.layers:
-            current_inputs = layer.batch_process(current_inputs, mask)
-        return current_inputs
-
-    # TODO: fix transform issues
-    def predict(self, inputs: np.ndarray):
-        return self.batch_eval(inputs)
-    
-    def eval(self, inputs: np.ndarray, mask=False):
-        outputs = []
-        for i in range(len(inputs)):
-            outputs.append(self.process(inputs[i], mask))
-        return np.array(outputs, dtype=self.dtype)
 
     def BCE(self, y_pred_all: np.ndarray, y_exp_all: np.ndarray):
         return self.CE(y_pred_all, y_exp_all)
@@ -213,7 +210,6 @@ class NeuralNet:
                 layer.weights = np.array(file[f"layer{index}/weights"])
                 layer.biases = np.array(file[f"layer{index}/biases"])
                 layer.activation_method = file[f"layer{index}"].attrs["activation"]
-                print(layer.weights.shape, layer.activation_method)
 
     def print_epoch_report(self, epoch, epoch_loss, epoch_losses, accuracy_train, prev_accuracy_train, epoch_time):
         str_epoch = f"EPOCH: {epoch + 1}"
@@ -243,8 +239,8 @@ class NeuralNet:
 
     def train(self, X: np.ndarray, y_exp: np.ndarray, epochs = 10, batch_size=32, validate = None,
               display=True, lr_scheduling = False, **kwargs):
+
         # set parameters:
-        
         noise_normalize = kwargs["noise_normalize"] if "noise_normalize" in kwargs else False
         dropout = kwargs["dropout"] if "dropout" in kwargs else False
 
@@ -262,7 +258,7 @@ class NeuralNet:
         # for adam optimization
         adam_t = 0
         initial_learning_rate = self.learning_rate
-        lr_k = 0.000000230/batch_size # learning rate decay constant
+        lr_k = 0.000000230/batch_size # learning rate decay constant factor
 
         for epoch in range(epochs):
             TIMER_epoch = time.time()
@@ -273,46 +269,37 @@ class NeuralNet:
             y_exp = y_exp[shuffled_indices_epoch]
             
             for batch_number in range(len(X)//batch_size):
-                #print("11")
-                #TIMER_batch = time.time()
                 # slice a batch of the shuffled X
                 X_i = X[batch_size * batch_number : batch_size * (batch_number + 1)]
                 if noise_normalize:
                     mu, sigma = 0.05, 0.05
                     X_i += self.rng.normal(mu, sigma, size=X_i.shape).clip(0, 1)
-                    #X_i += 0.05*self.rng.random(X_i.shape)
                 y_exp_i = y_exp[batch_size * batch_number : batch_size * (batch_number + 1)]
-                #print("1", y_exp_i.shape)
-                y_pred = self.batch_eval(X_i, mask=dropout)
-                #print("pred:", y_pred)
-                #print("2", y_pred.shape)
-                #TIMER_1 = time.time()
+                y_pred = self.predict(X_i, mask=dropout)
                 Y_pred.append(y_pred)
-                #TOTAL_TIMER_1 += time.time() - TIMER_1
 
-
+                # update adam optimizer t value
                 adam_t += 1
 
                 # backpropogation
-                for i in reversed(range(len(self.layers))): # TODO: fix this weird reversed loop
-                    #TIMER_backprop = time.time()
+                for i in reversed(range(len(self.layers))):
                     # for each layer, starting from the last, go through each node and calculate the deltas
-                    raw_output = self.layers[i].batch_raw_outputs
+                    raw_output = self.layers[i].raw_outputs
                     if i == len(self.layers) - 1:
                         if (self.layers[i].activation_method == "softmax" and (self.loss_method == "CE" or self.loss_method == "BCE")):
                             delta_j = self.grad_softmax_CE(y_pred, y_exp_i)
                         else:
                             delta_j = self.loss_derivative(y_pred, y_exp_i) * self.layers[i].activation_derivative(raw_output)
-                        self.layers[i].batch_deltas = delta_j
+                        self.layers[i].deltas = delta_j
                     else:
                         # sum along the weights and the previous deltas along their respective axes
-                        sum_delta_weights = self.layers[i + 1].batch_deltas @ self.layers[i + 1].weights
+                        sum_delta_weights = self.layers[i + 1].deltas @ self.layers[i + 1].weights
                         delta_j = sum_delta_weights * self.layers[i].activation_derivative(raw_output)
-                        self.layers[i].batch_deltas = delta_j
+                        self.layers[i].deltas = delta_j
                     if i == 0:
                         output_k: np.ndarray = X_i
                     else:
-                        output_k: np.ndarray = self.layers[i - 1].batch_outputs
+                        output_k: np.ndarray = self.layers[i - 1].outputs
 
                     # update weights
                     weight_decay = 0.01
@@ -340,15 +327,11 @@ class NeuralNet:
                     # update biases in place
                     self.layers[i].biases *= (1 - self.learning_rate * weight_decay)
                     self.layers[i].biases -= self.learning_rate * optimized_delta
-                    #self.layers[i].biases -= self.learning_rate * (optimized_delta + weight_decay*self.layers[i].biases)
                 
                     if lr_scheduling:
                         self.learning_rate = initial_learning_rate * np.exp(- lr_k * adam_t)
-
-                    #TOTAL_TIMER_backprop += time.time() - TIMER_backprop
                 loss = self.loss(y_pred, y_exp_i)
                 losses.append(loss)
-                #TOTAL_TIMER_batch += time.time() - TIMER_batch
             
             TIMER_epoch = time.time() - TIMER_epoch
 
@@ -375,11 +358,4 @@ class NeuralNet:
                     prev_accuracy_train = accuracy_train
                 else:
                     if epoch % 20 == 0: print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss}    LOSS CHANGE: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}")
-
-            #TOTAL_TIMER_epoch += time.time() - TIMER_epoch
-            #print(f"Timer backprop: {TOTAL_TIMER_backprop:.4g}")
-            #print(f"Timer backprop1: {TOTAL_TIMER_backprop1:.4g}")
-            #print(f"Timer batch: {TOTAL_TIMER_batch:.4g}")
-            #print(f"Timer epoch: {TOTAL_TIMER_epoch:.4g}")
-            #print(f"Timer 1: {TOTAL_TIMER_1:.4g}")
         return epoch_losses, np.array(Y_pred)
