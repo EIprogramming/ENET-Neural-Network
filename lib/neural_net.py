@@ -87,8 +87,7 @@ class NeuralNet:
                 case "InputND":
                     layers.append(InputND(layer_shape))
                 case "Convolutional":
-                    #layers.append(Convolutional(layer_shape, 2, 3, 2, 1))
-                    ... # TODO: add convolutional back to Layer inheritance
+                    layers.append(Convolutional(layer_shape, new_layer.kernel_params))
                 case _:
                     raise ValueError(f"Invalid layer type {new_layer.layer_type}")
             prev_layer_shape = layer_shape
@@ -164,17 +163,10 @@ class NeuralNet:
 
     def adam_optimize(self, t, gradient, prev_momentum, prev_variance, beta_1 = 0.9, beta_2 = 0.999, epsilon=1e-8):
         # momentum / mean
-        #print(gradient.shape, prev_momentum.shape, prev_variance.shape)
-        #print(gradient.flags)
-        #print(prev_momentum.flags)
-        #print(prev_variance.flags)
         first_moment = self.momentum(gradient, prev_momentum, beta_1)
 
         # variance
         second_moment = self.RMSprop_variance(gradient, prev_variance, beta_2)
-
-        #step_size = 1 / (1 - beta_1**t)
-        #bias_correction2 = (1 - beta_2**t) ** 0.5
 
         first_moment_corrected = first_moment / (1 - beta_1**(t + 1))
         second_moment_corrected = second_moment / (1 - beta_2**(t + 1))
@@ -311,11 +303,9 @@ class NeuralNet:
                                                                              grad_loss,
                                                                              self.layers[i].weight_momenta,
                                                                              self.layers[i].weight_variances)
-
                     # update weights in place
                     self.layers[i].weights *= (1 - self.learning_rate * weight_decay)
                     self.layers[i].weights -= self.learning_rate * optimized_loss
-                    
                     # update biases
                     grad_bias = np.mean(delta_j, axis=0)
                     optimized_delta, \
@@ -324,11 +314,9 @@ class NeuralNet:
                                                                            grad_bias, 
                                                                            self.layers[i].bias_momenta,
                                                                            self.layers[i].bias_variances)
-                    
                     # update biases in place
                     self.layers[i].biases *= (1 - self.learning_rate * weight_decay)
                     self.layers[i].biases -= self.learning_rate * optimized_delta
-                
                     if lr_scheduling:
                         self.learning_rate = initial_learning_rate * np.exp(- lr_k * adam_t)
                 loss = self.loss(y_pred, y_exp_i)
