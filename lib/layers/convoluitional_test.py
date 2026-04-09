@@ -41,6 +41,8 @@ myConvLayer.biases = myConvLayer.biases .astype(int)
 
 myConvLayer.process(myConvArray)
 
+
+
 print(myConvLayer.outputs_nd.shape)
 print(myConvLayer.outputs_nd[0, :, :, 0])
 print(myConvLayer.outputs_nd[0, :, :, 1])
@@ -49,3 +51,15 @@ print(myConvLayer.outputs_nd[1, :, :, 0])
 print(myConvLayer.outputs_nd[1, :, :, 1])
 
 print(myConvLayer.outputs_nd.shape, myConvLayer.outputs.shape)
+
+output_test = myConvLayer.convolve_specific(myConvArray, TEST_KERNELS, TEST_BIASES, S=2)
+print("="*16)
+print(output_test.shape)
+print(output_test[0, :, :, 0])
+print(output_test[0, :, :, 1])
+print("-"*16)
+print(output_test[1, :, :, 0])
+print(output_test[1, :, :, 1])
+
+#Inputs Shape: (3, 7, 7, 3)
+#Filters Shape: (2, 3, 3, 3)

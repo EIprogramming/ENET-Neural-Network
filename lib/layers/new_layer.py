@@ -12,6 +12,7 @@ class NewLayer:
         self.shape: tuple = shape
         self.layer_type = layer_type
         self.kernel_params: tuple[int, int, int] | None = kwargs["kernel_params"] if "kernel_params" in kwargs else None
+        self.input_shape: tuple | None = kwargs["input_shape"] if "input_shape" in kwargs else None
         self.validate_shape()
         self.validate_type()
     

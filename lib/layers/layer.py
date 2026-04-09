@@ -20,6 +20,9 @@ class Layer:
         else:
             print("No weight init specified...", init_method)
             return np.zeros(shape=self.shape, dtype=self.dtype)
+        
+    def initialize_weights(self, init_method):
+        self.weights = self.initialize(init_method)
 
     def bias_initialize(self, init_method: str=""):
         if init_method == "Zero":

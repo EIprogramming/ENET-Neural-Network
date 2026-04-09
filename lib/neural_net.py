@@ -87,7 +87,7 @@ class NeuralNet:
                 case "InputND":
                     layers.append(InputND(layer_shape))
                 case "Convolutional":
-                    layers.append(Convolutional(layer_shape, new_layer.kernel_params))
+                    layers.append(Convolutional(new_layer.input_shape, kernel_params=new_layer.kernel_params))
                 case _:
                     raise ValueError(f"Invalid layer type {new_layer.layer_type}")
             prev_layer_shape = layer_shape
@@ -287,7 +287,10 @@ class NeuralNet:
                     else:
                         # sum along the weights and the previous deltas along their respective axes
                         sum_delta_weights = self.layers[i + 1].deltas @ self.layers[i + 1].weights
+                        print(f"sum_delta_weights: ", sum_delta_weights.shape, self.layers[i + 1].deltas.shape, self.layers[i + 1].weights.shape)
                         delta_j = sum_delta_weights * self.layers[i].activation_derivative(raw_output)
+                        print(f"delta_j: ", delta_j.shape)
+                        print(f"raw_output: ", raw_output.shape)
                         self.layers[i].deltas = delta_j
                     if i == 0:
                         output_k: np.ndarray = X_i
@@ -297,6 +300,9 @@ class NeuralNet:
                     # update weights
                     weight_decay = 0.01
                     grad_loss = delta_j.T @ output_k / output_k.shape[0]
+                    print(f"Hello?: ", delta_j.T.shape, grad_loss.shape, output_k.shape)
+                    try: print(f"Number of weights", self.layers[i].kernels.shape) # type: ignore
+                    except: pass
                     optimized_loss, \
                         self.layers[i].weight_momenta, \
                         self.layers[i].weight_variances = self.adam_optimize(adam_t,
