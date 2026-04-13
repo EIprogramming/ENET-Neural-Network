@@ -230,6 +230,18 @@ class NeuralNet:
 
         print(str_epoch, str_loss, str_loss_change, str_accuracy_train, str_accuracy_change, str_epoch_time, sep="    ")
 
+    @staticmethod
+    def batch (X: np.ndarray, y: np.ndarray, batch_size: int, batch_number: int, num_batches: int) -> tuple[np.ndarray, np.ndarray]:
+        batch_start = batch_size * batch_number
+        batch_end = batch_size * (batch_number + 1) if batch_number != num_batches - 1 else None
+
+        X_i = X[batch_start : batch_end]
+        y_i = y[batch_start : batch_end]
+        return X_i, y_i
+    
+    def noise_normalize(self, X: np.ndarray, mu = 0.05, sigma = 0.05):
+        X += self.rng.normal(mu, sigma, size=X.shape).clip(0, 1)
+
     def train(self, X: np.ndarray, y_exp: np.ndarray, epochs = 10, batch_size=32, validate = None,
               display=True, lr_scheduling = False, **kwargs):
 
@@ -256,42 +268,40 @@ class NeuralNet:
         for epoch in range(epochs):
             TIMER_epoch = time.time()
             losses = []
-            Y_pred = []
             shuffled_indices_epoch = shuffled_indices[epoch]
             X = X[shuffled_indices_epoch]
             y_exp = y_exp[shuffled_indices_epoch]
             
-            for batch_number in range(len(X)//batch_size):
+            # TODO: create a batched list of X, y to iterate over
+            num_batches = len(X)//batch_size
+            if (len(X) % batch_size) != 0:  num_batches += 1
+            # batch_number ranges from 
+            for batch_number in range(num_batches):
                 # slice a batch of the shuffled X
-                X_i = X[batch_size * batch_number : batch_size * (batch_number + 1)]
-                if noise_normalize:
-                    mu, sigma = 0.05, 0.05
-                    X_i += self.rng.normal(mu, sigma, size=X_i.shape).clip(0, 1)
-                y_exp_i = y_exp[batch_size * batch_number : batch_size * (batch_number + 1)]
+                X_i, y_exp_i = NeuralNet.batch(X, y_exp, batch_size, batch_number, num_batches)
+
+                if noise_normalize: self.noise_normalize(X_i)
+
                 y_pred = self.predict(X_i, mask=dropout)
-                Y_pred.append(y_pred)
 
                 # update adam optimizer t value
                 adam_t += 1
 
                 # backpropogation
                 for i in reversed(range(len(self.layers))):
+                    layer = self.layers[i]
                     # for each layer, starting from the last, go through each node and calculate the deltas
-                    raw_output = self.layers[i].raw_outputs
+                    raw_output = layer.raw_outputs
                     if i == len(self.layers) - 1:
-                        if (self.layers[i].activation_method == "softmax" and (self.loss_method == "CE" or self.loss_method == "BCE")):
-                            delta_j = self.grad_softmax_CE(y_pred, y_exp_i)
+                        if (layer.activation_method == "softmax" and (self.loss_method == "CE" or self.loss_method == "BCE")):
+                            layer.deltas = self.grad_softmax_CE(y_pred, y_exp_i)
                         else:
-                            delta_j = self.loss_derivative(y_pred, y_exp_i) * self.layers[i].activation_derivative(raw_output)
-                        self.layers[i].deltas = delta_j
+                            layer.deltas = self.loss_derivative(y_pred, y_exp_i) * layer.activation_derivative(raw_output)
                     else:
                         # sum along the weights and the previous deltas along their respective axes
-                        sum_delta_weights = self.layers[i + 1].deltas @ self.layers[i + 1].weights
-                        print(f"sum_delta_weights: ", sum_delta_weights.shape, self.layers[i + 1].deltas.shape, self.layers[i + 1].weights.shape)
-                        delta_j = sum_delta_weights * self.layers[i].activation_derivative(raw_output)
-                        print(f"delta_j: ", delta_j.shape)
-                        print(f"raw_output: ", raw_output.shape)
-                        self.layers[i].deltas = delta_j
+                        next_layer = self.layers[i + 1]
+                        sum_delta_weights = next_layer.deltas @ next_layer.weights
+                        layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
                     if i == 0:
                         output_k: np.ndarray = X_i
                     else:
@@ -299,40 +309,33 @@ class NeuralNet:
 
                     # update weights
                     weight_decay = 0.01
-                    grad_loss = delta_j.T @ output_k / output_k.shape[0]
-                    print(f"Hello?: ", delta_j.T.shape, grad_loss.shape, output_k.shape)
-                    try: print(f"Number of weights", self.layers[i].kernels.shape) # type: ignore
-                    except: pass
+                    grad_loss = layer.deltas.T @ output_k / output_k.shape[0]
                     optimized_loss, \
-                        self.layers[i].weight_momenta, \
-                        self.layers[i].weight_variances = self.adam_optimize(adam_t,
+                        layer.weight_momenta, \
+                        layer.weight_variances = self.adam_optimize(adam_t,
                                                                              grad_loss,
-                                                                             self.layers[i].weight_momenta,
-                                                                             self.layers[i].weight_variances)
+                                                                             layer.weight_momenta,
+                                                                             layer.weight_variances)
                     # update weights in place
-                    self.layers[i].weights *= (1 - self.learning_rate * weight_decay)
-                    self.layers[i].weights -= self.learning_rate * optimized_loss
+                    layer.weights *= (1 - self.learning_rate * weight_decay)
+                    layer.weights -= self.learning_rate * optimized_loss
                     # update biases
-                    grad_bias = np.mean(delta_j, axis=0)
+                    grad_bias = np.mean(layer.deltas, axis=0)
                     optimized_delta, \
-                        self.layers[i].bias_momenta, \
-                        self.layers[i].bias_variances = self.adam_optimize(adam_t, 
+                        layer.bias_momenta, \
+                        layer.bias_variances = self.adam_optimize(adam_t, 
                                                                            grad_bias, 
-                                                                           self.layers[i].bias_momenta,
-                                                                           self.layers[i].bias_variances)
+                                                                           layer.bias_momenta,
+                                                                           layer.bias_variances)
                     # update biases in place
-                    self.layers[i].biases *= (1 - self.learning_rate * weight_decay)
-                    self.layers[i].biases -= self.learning_rate * optimized_delta
+                    layer.biases *= (1 - self.learning_rate * weight_decay)
+                    layer.biases -= self.learning_rate * optimized_delta
                     if lr_scheduling:
                         self.learning_rate = initial_learning_rate * np.exp(- lr_k * adam_t)
+                
                 loss = self.loss(y_pred, y_exp_i)
                 losses.append(loss)
-            
             TIMER_epoch = time.time() - TIMER_epoch
-
-            # reshape Y_pred:
-            Y_pred = np.array(Y_pred, dtype=self.dtype)
-            Y_pred = np.concatenate(Y_pred, axis=-1)
 
             # calculate loss
             epoch_loss = np.mean(losses)
@@ -353,4 +356,4 @@ class NeuralNet:
                     prev_accuracy_train = accuracy_train
                 else:
                     if epoch % 20 == 0: print(f"EPOCH: {epoch + 1}    LOSS: {epoch_loss}    LOSS CHANGE: {epoch_loss - epoch_losses[epoch - 1] if epoch > 0 else 0:.4g}")
-        return epoch_losses, np.array(Y_pred)
+        return epoch_losses, self.report
