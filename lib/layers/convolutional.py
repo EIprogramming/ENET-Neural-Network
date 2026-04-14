@@ -2,7 +2,7 @@
 
 import numpy as np
 #from layer import Layer
-from layers.layer import Layer
+from layer import Layer
 
 class Convolutional(Layer):
     def __init__(self, input_shape: tuple | None, kernel_params: tuple[int, int, int, int] | None, **kwargs):
@@ -74,16 +74,63 @@ class Convolutional(Layer):
         for i in range(0, self.output_shape[0]):
             for j in range(0, self.output_shape[1]):
                 for k, kernel in enumerate(self.kernels):
-                    # slice the input into an F x F kernel shape
                     inputs_slice = inputs[:, self.stride*i:self.stride*i+self.filter_size, self.stride*j:self.stride*j+self.filter_size, :]
+
                     output = np.sum(inputs_slice * kernel, axis=(1, 2, 3)) + self.biases[k]
                     self.outputs_nd[:, i, j, k] = output
-                    #print("ijk", i, j, k, "\n output:", output, "\n", inputs_slice, "\n", kernel)
-                    #input()
         return self.outputs_nd
     
-    def vec_convole(self, ijk):
-        ...
+    def vectorized_convolution(self, inputs, n, i, j, k):
+        inputs_slice = inputs[n, self.stride*i:self.stride*i+self.filter_size, self.stride*j:self.stride*j+self.filter_size, :]
+        output = np.sum(inputs_slice * self.kernels[k]) + self.biases[k]
+        return output
+    
+    @staticmethod
+    def einsum_convolve3D(slices: np.ndarray, kernels: np.ndarray) -> np.ndarray:
+        """ Perform a 3D convolution using `np.einsum`.
+
+        Performs a convolution on a window slice broadcasted
+        over each batch, each window per row and each window per column,
+        and per kernel.
+
+        Parameters
+        ----------
+            slices : np.ndarray, shape (n, i, j, d, h, w)
+                An array of the window-view slices of the inputs.
+                Shape dimensions:
+
+                * `n` : number of samples (batch size)
+                * `i` : the number of windows per row of the inputs
+                * `j` : the number of windows per column of the inputs
+                * `d` : depth of the window
+                * `h` : height of the window
+                * `w` : width of the window
+            kernels : np.ndarray, shape (k, w, h, d)
+           
+                Shape dimensions:
+
+                * `k` : number of kernels
+                * `h` : height of the kernel (same as window)
+                * `w` : width of the kernel (same as window)
+                * `d` : depth of the window (same as window)
+        
+        Returns
+        -------
+        convolution : np.ndarray, shape (n, i, j, k)
+            The batched convolution of the slices with the kernels.
+        """
+        
+        return np.einsum('nijdwh, ...kwhd -> nijk...', slices, kernels)
+
+    def convolve3D(self, inputs):
+        # TODO: add biases...
+        print("\033[33mWARNING\033[0m: BIASES NOT ADDED YET TO `convolve3d`")
+        axes = (1, 2)
+        slices = np.lib.stride_tricks.sliding_window_view(inputs, (self.filter_size, self.filter_size), axis=axes) # type: ignore
+        
+        output = self.einsum_convolve3D(slices, self.kernels)
+
+        return output
 
     @staticmethod # TODO: make this the usual convolve method
     def convolve_specific(inputs, filters, biases = None, S = 1, P = 1):
@@ -119,7 +166,7 @@ class Convolutional(Layer):
                         outputs_nd[:, i, j, k] = np.sum(inputs_slice * kernel) + biases[k]
         return outputs_nd
     
-    def process_nd(self, inputs: np.ndarray, mask=False):
+    def process_nd(self, inputs: np.ndarray, vectorized, mask=False):
         # create a tuple of tuples that ensures that only the middle two dimensions of the input are zero padded
         if len(inputs.shape) == 4:
             padding_shape = ((0, 0), (self.pad, self.pad), (self.pad, self.pad), (0, 0))
@@ -129,19 +176,19 @@ class Convolutional(Layer):
         batch_shape: tuple = (inputs.shape[0],) + self.output_shape
         # initialize the size of the batch output
         self.outputs_nd = np.zeros(batch_shape)
-        self.raw_outputs_nd : np.ndarray = self.convolve(padded_inputs)
+        self.raw_outputs_nd : np.ndarray = self.convolve3D(padded_inputs) if vectorized else self.convolve(padded_inputs)
         self.raw_outputs = self.raw_outputs_nd.reshape(inputs.shape[0], np.prod(self.raw_outputs_nd.shape[1:]))
         self.outputs_nd = self.activate(self.raw_outputs_nd)
         self.outputs = self.outputs_nd.reshape(inputs.shape[0], np.prod(self.raw_outputs_nd.shape[1:]))
         return self.outputs_nd
     
-    def process(self, inputs: np.ndarray, mask=False):
+    def process(self, inputs: np.ndarray, vectorized=True, mask=False):
         # process a 1D batched input, return a 1D batched input
         batch_size = inputs.shape[0]
         if len(self.input_shape) == 2: # if its 2D, add an extra empty dimension
             inputs_nd = inputs.reshape((batch_size,) + self.input_shape + (1,))
         else:
             inputs_nd = inputs.reshape((batch_size,) + self.input_shape)
-        self.process_nd(inputs_nd)
+        self.process_nd(inputs_nd, vectorized)
         return self.outputs
 
