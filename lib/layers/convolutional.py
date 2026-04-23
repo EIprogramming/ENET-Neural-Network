@@ -5,85 +5,97 @@ import numpy as np
 from layer import Layer
 
 class Convolutional(Layer):
-    def __init__(self, input_shape: tuple | None, kernel_params: tuple[int, int, int, int] | None, **kwargs):
+    def __init__(self, input_shape: tuple, kernel_params: tuple[int, int, int, int], **kwargs):
         """Create a convolutional layer.
 
         Parameters
         ----------
             input_shape : tuple
                 The volume of the input, W1 x H1 x D1 for width, height, depth, respectively.
-            kernel_params: tuple[int, int, int]
-                A tuple of kernel parameters (K, F, S).Where
+            kernel_params: tuple[int, int, int, int]
+                A tuple of kernel parameters (K, F, S, P).Where
                 K: int is the number of filters,
                 F: int is the spacial extent, field size, or height/width of the filter,
                 S: int is the stride of the filters: how many 'pixels' or cells the filters will move by.
-            P : int, optional
-                The amount of zero padding added to the input. Convolution reduces shape of the data, by
-                including zero padding, this is avoided. Default is 1.
+                P: int is the size of zero padding added to the input. Default is 1 (to avoid dimension reduction).
         """
         # error handling to ensure compatability with Layer and NewLayer
-        if kernel_params is None: raise ValueError("kernel_params cannot be None.")
-        if input_shape is None: raise ValueError("input_shape cannot be None.")
-        K, F, S, P = kernel_params
-        W2 = (input_shape[0] - F + 2*P)//S + 1
-        H2 = (input_shape[1] - F + 2*P)//S + 1
+        self._init_kernel_parameters(*kernel_params)
+        self._init_outputs(kernel_params, input_shape)
+        self._init_super(input_shape, self.output_shape, **kwargs)
+
+        self._init_input_parameters(input_shape)
+        self._init_neural_parameters()
+        self._init_adam_parameters()
+
+    @staticmethod
+    def get_output_shape(K: int, F: int, S: int, P: int, W1: int, H1: int):
+        """Get the shape of the convolution output.
+
+        Parameters
+        ----------
+            K : int
+                The number of filters.
+            F : int
+                The spacial extent (height and width) of the filter.
+            S : int
+                The stride of the filter.
+            P : int
+                The size of zero padding.
+            W1 : int
+                The width of the input.
+            H1 : int
+                The height of the input.
+        """
+        W2 = (W1 - F + 2*P)//S + 1
+        H2 = (H1 - F + 2*P)//S + 1
         D2 = K
-        super().__init__(sum(input_shape), W2 + H2 + D2, **kwargs) # TODO: fix inheritance
-        
-        # CONVOLUTIONAL PARAMETERS #
-        
-        # initialize input matrix shape
-        if len(input_shape) == 2:
-            input_shape = input_shape + (1,) 
-        self.input_shape = input_shape
-        self.input_depth = input_shape[-1]
+
+        return (W2, H2, D2)
+
+    def _init_kernel_parameters(self, K: int, F: int, S: int, P: int):
         self.kernel_num = K
         self.filter_size = F
         self.stride = S
-        self.pad = P
+        self.padding = P
 
-        W2 = (input_shape[0] - F + 2*P)//S + 1
-        H2 = (input_shape[1] - F + 2*P)//S + 1
-        D2 = K
-        self.output_shape = (W2, H2, D2)
-        self.raw_outputs_nd = np.zeros((1, W2, H2, D2)) # full size initialized later, since we are using batches
-        self.raw_outputs = self.raw_outputs_nd.reshape((1,) + (self.raw_outputs_nd.shape))
-        self.outputs_nd = np.zeros((1, W2, H2, D2)) # full size initialized later, since we are using batches
+    def _init_neural_parameters(self):
+        K = self.kernel_num
+        F = self.filter_size
+        D1 = self.input_depth
 
         # create K filters of shape FxFxD1
-        self.kernels = np.zeros((K, F, F, self.input_depth))
+        self.kernels = np.zeros((K, F, F, D1))
         self.weights = self.kernels.ravel() # provides a flattened view of kernels
         self.deltas = np.zeros_like(self.weights)
         self.biases = np.zeros(K)
-        # for adam optimizer
+    
+    def _init_adam_parameters(self):
         self.weight_momenta = np.zeros_like(self.weights, dtype=self.dtype)
         self.weight_variances = np.zeros_like(self.weights, dtype=self.dtype)
         self.bias_momenta = np.zeros_like(self.biases, dtype=self.dtype)
         self.bias_variances = np.zeros_like(self.biases, dtype=self.dtype)
 
-        # PARENT (Layer) OVERRIDES #
-        self.shape = sum(self.weights.shape)
-        self.n_input = np.prod(input_shape)
-        self.n_output = W2 * H2 * D2
-    
-    def initialize_weights(self, init_method):
+    def _init_input_parameters(self, input_shape: tuple[int, int, int]):
+        self.input_shape = input_shape
+        self.input_depth = input_shape[-1]
+
+    def _init_outputs(self, kernel_params: tuple[int, int, int, int], input_shape: tuple[int, int, int]):
+        K, F, S, P = kernel_params
+        W1, H1 = input_shape[0], input_shape[1]
+        self.output_shape = self.get_output_shape(K, F, S, P, W1, H1)
+        self.raw_outputs_nd = np.zeros(0) # full size initialized later, since we are using batches
+        self.outputs_nd = np.zeros(0) # full size initialized later, since we are using batches
+
+    def _init_super(self, input_shape: tuple[int, int, int], output_shape: tuple[int, int, int], **kwargs):
+        input_shape_flattened = sum(input_shape)
+        output_shape_flattened = sum(output_shape)
+        super().__init__(input_shape_flattened, output_shape_flattened, **kwargs) # TODO: fix inheritance
+
+    def initialize_weights(self, init_method: str):
+        # TODO: incorporate into __init__
         self.weights = self.initialize(init_method)
         self.kernels = self.weights.reshape(self.kernels.shape)
-
-    def convolve(self, inputs):
-        for i in range(0, self.output_shape[0]):
-            for j in range(0, self.output_shape[1]):
-                for k, kernel in enumerate(self.kernels):
-                    inputs_slice = inputs[:, self.stride*i:self.stride*i+self.filter_size, self.stride*j:self.stride*j+self.filter_size, :]
-
-                    output = np.sum(inputs_slice * kernel, axis=(1, 2, 3)) + self.biases[k]
-                    self.outputs_nd[:, i, j, k] = output
-        return self.outputs_nd
-    
-    def vectorized_convolution(self, inputs, n, i, j, k):
-        inputs_slice = inputs[n, self.stride*i:self.stride*i+self.filter_size, self.stride*j:self.stride*j+self.filter_size, :]
-        output = np.sum(inputs_slice * self.kernels[k]) + self.biases[k]
-        return output
     
     @staticmethod
     def einsum_convolve3D(slices: np.ndarray, kernels: np.ndarray) -> np.ndarray:
@@ -120,75 +132,43 @@ class Convolutional(Layer):
             The batched convolution of the slices with the kernels.
         """
         
-        return np.einsum('nijdwh, ...kwhd -> nijk...', slices, kernels)
+        return np.einsum('nijdwh, ...kwhd -> nijk...', slices, kernels, optimize=True)
 
-    def convolve3D(self, inputs):
-        # TODO: add biases...
-        print("\033[33mWARNING\033[0m: BIASES NOT ADDED YET TO `convolve3d`")
+    @staticmethod
+    def convolve3D(inputs, filters: np.ndarray, biases: np.ndarray | None = None, stride: int = 1):
         axes = (1, 2)
-        slices = np.lib.stride_tricks.sliding_window_view(inputs, (self.filter_size, self.filter_size), axis=axes) # type: ignore
+        filter_size = filters.shape[2]
+
+        slices = np.lib.stride_tricks.sliding_window_view(inputs, (filter_size, filter_size), axis=axes) # type: ignore
         
-        output = self.einsum_convolve3D(slices, self.kernels)
+        # apply the stride
+        slices = slices[:, ::stride, ::stride, :, :, :]
+    
+        # apply biases to filters
+        if biases is None:
+            biases = np.zeros(0)
+
+        filters_biased = filters + biases[:, np.newaxis, np.newaxis, np.newaxis]
+
+        output = Convolutional.einsum_convolve3D(slices, filters_biased) # maybe + self.biases?
 
         return output
 
-    @staticmethod # TODO: make this the usual convolve method
-    def convolve_specific(inputs, filters, biases = None, S = 1, P = 1):
-        batch_size = inputs.shape[0]
-        K = filters.shape[1]
-        F = filters.shape[2]
-        W2 = (inputs.shape[1] - F + 2*P)//S + 1
-        H2 = (inputs.shape[2] - F + 2*P)//S + 1
-        D2 = K
-
-        # 14 - 28
-        #print("WHD:", W2, H2, D2, "KFPS: ", K, F, P, S)
-
-        # set up biases for None
-        if biases is None:
-            biases = np.zeros(K)
-        output_shape = (W2, H2, D2)
-        if len(inputs.shape) == 4:
-            padding_shape = ((0, 0), (P, P), (P, P), (0, 0))
-        elif len(inputs.shape) == 3:
-            padding_shape = ((P, P), (P, P), (0, 0))
-        else:
-            raise ValueError("Inputs must be either 4 dimensional or 3 dimensional.")
-        padded_inputs = np.pad(inputs, padding_shape)
-        outputs_nd = np.zeros((batch_size, W2, H2, D2))
-        for batch in range(batch_size):
-            kernels = filters[batch]
-            for i in range(0, output_shape[0]):
-                for j in range(0, output_shape[1]):
-                    for k, kernel in enumerate(kernels):
-                        # slice the input into an F x F kernel shape
-                        inputs_slice = padded_inputs[:, S*i:S*i+F, S*j:S*j+F, :]
-                        outputs_nd[:, i, j, k] = np.sum(inputs_slice * kernel) + biases[k]
-        return outputs_nd
-    
-    def process_nd(self, inputs: np.ndarray, vectorized, mask=False):
+    @staticmethod
+    def pad(inputs: np.ndarray, padding: int):
+        # TODO: make this n-dimensional
         # create a tuple of tuples that ensures that only the middle two dimensions of the input are zero padded
         if len(inputs.shape) == 4:
-            padding_shape = ((0, 0), (self.pad, self.pad), (self.pad, self.pad), (0, 0))
+            padding_shape = ((0, 0), (padding, padding), (padding, padding), (0, 0))
         else:
             raise ValueError(f"Input array must be 4 dimensional, got shape: {inputs.shape}")
-        padded_inputs = np.pad(inputs, padding_shape)
-        batch_shape: tuple = (inputs.shape[0],) + self.output_shape
+        return np.pad(inputs, padding_shape)
+
+    def process(self, inputs: np.ndarray):
+        padded_inputs = Convolutional.pad(inputs, self.padding)
         # initialize the size of the batch output
-        self.outputs_nd = np.zeros(batch_shape)
-        self.raw_outputs_nd : np.ndarray = self.convolve3D(padded_inputs) if vectorized else self.convolve(padded_inputs)
-        self.raw_outputs = self.raw_outputs_nd.reshape(inputs.shape[0], np.prod(self.raw_outputs_nd.shape[1:]))
+        self.raw_outputs_nd : np.ndarray = Convolutional.convolve3D(padded_inputs, self.kernels, self.biases, self.stride)
         self.outputs_nd = self.activate(self.raw_outputs_nd)
-        self.outputs = self.outputs_nd.reshape(inputs.shape[0], np.prod(self.raw_outputs_nd.shape[1:]))
         return self.outputs_nd
     
-    def process(self, inputs: np.ndarray, vectorized=True, mask=False):
-        # process a 1D batched input, return a 1D batched input
-        batch_size = inputs.shape[0]
-        if len(self.input_shape) == 2: # if its 2D, add an extra empty dimension
-            inputs_nd = inputs.reshape((batch_size,) + self.input_shape + (1,))
-        else:
-            inputs_nd = inputs.reshape((batch_size,) + self.input_shape)
-        self.process_nd(inputs_nd, vectorized)
-        return self.outputs
 
