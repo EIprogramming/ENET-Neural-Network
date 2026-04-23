@@ -87,6 +87,8 @@ class NeuralNet:
                 case "InputND":
                     layers.append(InputND(layer_shape))
                 case "Convolutional":
+                    if (new_layer.input_shape is None or new_layer.kernel_params is None):
+                        raise ValueError("Convolutional Layer Gen. Failed")
                     layers.append(Convolutional(new_layer.input_shape, kernel_params=new_layer.kernel_params))
                 case _:
                     raise ValueError(f"Invalid layer type {new_layer.layer_type}")

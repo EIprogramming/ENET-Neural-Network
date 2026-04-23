@@ -84,8 +84,8 @@ class Convolutional(Layer):
         K, F, S, P = kernel_params
         W1, H1 = input_shape[0], input_shape[1]
         self.output_shape = self.get_output_shape(K, F, S, P, W1, H1)
-        self.raw_outputs_nd = np.zeros(0) # full size initialized later, since we are using batches
-        self.outputs_nd = np.zeros(0) # full size initialized later, since we are using batches
+        self.raw_outputs = np.zeros(0) # full size initialized later, since we are using batches
+        self.outputs = np.zeros(0) # full size initialized later, since we are using batches
 
     def _init_super(self, input_shape: tuple[int, int, int], output_shape: tuple[int, int, int], **kwargs):
         input_shape_flattened = sum(input_shape)
@@ -136,7 +136,7 @@ class Convolutional(Layer):
 
     @staticmethod
     def convolve3D(inputs, filters: np.ndarray, biases: np.ndarray | None = None, stride: int = 1):
-        axes = (1, 2)
+        axes = (1, 2) # apply the slice over the 1st and 2nd axes
         filter_size = filters.shape[2]
 
         slices = np.lib.stride_tricks.sliding_window_view(inputs, (filter_size, filter_size), axis=axes) # type: ignore
@@ -144,13 +144,12 @@ class Convolutional(Layer):
         # apply the stride
         slices = slices[:, ::stride, ::stride, :, :, :]
     
-        # apply biases to filters
+        output = Convolutional.einsum_convolve3D(slices, filters)
+
+        # apply biases
         if biases is None:
             biases = np.zeros(0)
-
-        filters_biased = filters + biases[:, np.newaxis, np.newaxis, np.newaxis]
-
-        output = Convolutional.einsum_convolve3D(slices, filters_biased) # maybe + self.biases?
+        output += biases
 
         return output
 
@@ -167,8 +166,8 @@ class Convolutional(Layer):
     def process(self, inputs: np.ndarray):
         padded_inputs = Convolutional.pad(inputs, self.padding)
         # initialize the size of the batch output
-        self.raw_outputs_nd : np.ndarray = Convolutional.convolve3D(padded_inputs, self.kernels, self.biases, self.stride)
-        self.outputs_nd = self.activate(self.raw_outputs_nd)
-        return self.outputs_nd
+        self.raw_outputs : np.ndarray = Convolutional.convolve3D(padded_inputs, self.kernels, self.biases, self.stride)
+        self.outputs = self.activate(self.raw_outputs)
+        return self.outputs
     
 
