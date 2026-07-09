@@ -80,6 +80,7 @@ class NeuralNet:
             layer_shape = new_layer.shape
             match new_layer.layer_type:
                 case "Dense":
+                    prev_layer_shape = (int(np.prod(prev_layer_shape)),) # reset the prev layer shape to one dimensional if it was, e.g. convolutional shape TODO - make this elegant
                     layers.append(Dense(prev_layer_shape[0], layer_shape[0], dtype=self.dtype, random_state=self.random_state))
                 case "Input":
                     pass # we dont need to specify an input layer in this case
@@ -118,8 +119,19 @@ class NeuralNet:
 
     def predict(self, inputs: np.ndarray, mask=False):
         current_inputs = inputs
+        is_flatten_next_input = False
         for layer in self.layers:
+            # undo flatten need for a second convolution - TODO: make this more elegant
+            if isinstance(layer, Convolutional):
+                is_flatten_next_input = False
+            if is_flatten_next_input:
+                batch_size = current_inputs.shape[0]
+                current_inputs = current_inputs.reshape((batch_size,-1))
             current_inputs = layer.process(current_inputs, mask)
+
+            # flatten next input for a non-convolutional layer
+            if isinstance(layer, Convolutional):
+                is_flatten_next_input = True
         return current_inputs
 
     def BCE(self, y_pred_all: np.ndarray, y_exp_all: np.ndarray):

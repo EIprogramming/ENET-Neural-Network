@@ -43,4 +43,4 @@ myConvLayer.process(myConvArray)
 
 print(f"TIME VECTORIZED: {time.time() - time_vectorized}")
 
-print("Output Shapes: ", myConvLayer.outputs_nd[0, 0, 0, 0], myConvLayer.outputs_nd.shape)
+print("Output Shapes: ", myConvLayer.outputs[0, 0, 0, 0], myConvLayer.outputs.shape)

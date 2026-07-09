@@ -29,6 +29,7 @@ class Convolutional(Layer):
         self._init_input_parameters(input_shape)
         self._init_neural_parameters()
         self._init_adam_parameters()
+        print(f"Convolution layer successfully created with kernel params (K, F, S, P): {kernel_params}")
 
     @staticmethod
     def get_output_shape(K: int, F: int, S: int, P: int, W1: int, H1: int):
@@ -139,7 +140,6 @@ class Convolutional(Layer):
 
     @staticmethod
     def convolve3D(inputs, filters: np.ndarray, biases: np.ndarray | None = None, stride: int = 1):
-        print(inputs.shape, filters.shape)
         axes = (1, 2) # apply the slice over the 1st and 2nd axes
         filter_size = filters.shape[2]
 
@@ -154,7 +154,6 @@ class Convolutional(Layer):
         if biases is None:
             biases = np.zeros(0)
         output += biases
-        print("out:", output.shape, filters.shape)
 
         return output
 
