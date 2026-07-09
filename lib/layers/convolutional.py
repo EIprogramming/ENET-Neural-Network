@@ -19,6 +19,8 @@ class Convolutional(Layer):
                 S: int is the stride of the filters: how many 'pixels' or cells the filters will move by.
                 P: int is the size of zero padding added to the input. Default is 1 (to avoid dimension reduction).
         """
+        # adjust to 3D if 2D input shape:
+        if len(input_shape) == 2: input_shape = input_shape + (1,)
         # error handling to ensure compatability with Layer and NewLayer
         self._init_kernel_parameters(*kernel_params)
         self._init_outputs(kernel_params, input_shape)
@@ -66,6 +68,7 @@ class Convolutional(Layer):
 
         # create K filters of shape FxFxD1
         self.kernels = np.zeros((K, F, F, D1))
+        self.shape = (K, F, F, D1)
         self.weights = self.kernels.ravel() # provides a flattened view of kernels
         self.deltas = np.zeros_like(self.weights)
         self.biases = np.zeros(K)
@@ -136,6 +139,7 @@ class Convolutional(Layer):
 
     @staticmethod
     def convolve3D(inputs, filters: np.ndarray, biases: np.ndarray | None = None, stride: int = 1):
+        print(inputs.shape, filters.shape)
         axes = (1, 2) # apply the slice over the 1st and 2nd axes
         filter_size = filters.shape[2]
 
@@ -150,6 +154,7 @@ class Convolutional(Layer):
         if biases is None:
             biases = np.zeros(0)
         output += biases
+        print("out:", output.shape, filters.shape)
 
         return output
 
@@ -163,8 +168,17 @@ class Convolutional(Layer):
             raise ValueError(f"Input array must be 4 dimensional, got shape: {inputs.shape}")
         return np.pad(inputs, padding_shape)
 
-    def process(self, inputs: np.ndarray):
-        padded_inputs = Convolutional.pad(inputs, self.padding)
+    def reshape(self, inputs):
+        batch_size = inputs.shape[0]
+        batch_shape = (batch_size,) + self.input_shape
+        inputs_reshaped = inputs.reshape(batch_shape)
+        return inputs_reshaped
+    
+
+    def process(self, inputs: np.ndarray, mask=False): # TODO: add masking (very late in the project)
+        inputs_reshaped = self.reshape(inputs)
+
+        padded_inputs = Convolutional.pad(inputs_reshaped, self.padding)
         # initialize the size of the batch output
         self.raw_outputs : np.ndarray = Convolutional.convolve3D(padded_inputs, self.kernels, self.biases, self.stride)
         self.outputs = self.activate(self.raw_outputs)

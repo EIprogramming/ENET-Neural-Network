@@ -34,11 +34,10 @@ class NeuralNet:
         dtype : optional
             The data type used in the network. Default is np.float64.
 
-            
         Examples
         --------
-        >>> NeuralNet((28**2, 256, 10)) # initialize a network with size 784 input layer, 256 hidden layer, and 10 output layer
-        >>> NeuralNet((2, 16, 2), learning_rate = 0.005, loss_method = "MSE", random_state=42, dtype=np.float32)
+        >>>### OUTDATED TODO NeuralNet((28**2, 256, 10)) # initialize a network with size 784 input layer, 256 hidden layer, and 10 output layer
+        >>>### OUTDATED TODO NeuralNet((2, 16, 2), learning_rate = 0.005, loss_method = "MSE", random_state=42, dtype=np.float32)
         """
         if len(layers) < 2:
             raise ValueError(f"Neural Network must have an input and output layer.")
@@ -274,7 +273,6 @@ class NeuralNet:
             X = X[shuffled_indices_epoch]
             y_exp = y_exp[shuffled_indices_epoch]
             
-            # TODO: create a batched list of X, y to iterate over
             num_batches = len(X)//batch_size
             if (len(X) % batch_size) != 0:  num_batches += 1
             # batch_number ranges from 
