@@ -117,6 +117,11 @@ class NeuralNet:
             case _:
                 raise ValueError(f"loss_method must be 'CE', 'BCE', or 'MSE', got {loss_method}")
 
+    @staticmethod
+    def flatten(input: np.ndarray):
+        batch_size = input.shape[0]
+        return input.reshape((batch_size, -1))
+
     def predict(self, inputs: np.ndarray, mask=False):
         current_inputs = inputs
         is_flatten_next_input = False
@@ -124,9 +129,7 @@ class NeuralNet:
             # undo flatten need for a second convolution - TODO: make this more elegant
             if isinstance(layer, Convolutional):
                 is_flatten_next_input = False
-            if is_flatten_next_input:
-                batch_size = current_inputs.shape[0]
-                current_inputs = current_inputs.reshape((batch_size,-1))
+            if is_flatten_next_input: current_inputs = NeuralNet.flatten(current_inputs)
             current_inputs = layer.process(current_inputs, mask)
 
             # flatten next input for a non-convolutional layer
@@ -302,8 +305,10 @@ class NeuralNet:
                 # backpropogation
                 for i in reversed(range(len(self.layers))):
                     layer = self.layers[i]
+                    print(i)
                     # for each layer, starting from the last, go through each node and calculate the deltas
                     raw_output = layer.raw_outputs
+                    print("rawoutputshape", raw_output.shape)
                     if i == len(self.layers) - 1:
                         if (layer.activation_method == "softmax" and (self.loss_method == "CE" or self.loss_method == "BCE")):
                             layer.deltas = self.grad_softmax_CE(y_pred, y_exp_i)
@@ -313,15 +318,33 @@ class NeuralNet:
                         # sum along the weights and the previous deltas along their respective axes
                         next_layer = self.layers[i + 1]
                         sum_delta_weights = next_layer.deltas @ next_layer.weights
-                        layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
+                        if not isinstance(layer, Convolutional):
+                            layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
+                        else:
+                            layer.deltas = sum_delta_weights.reshape(raw_output.shape) * layer.activation_derivative(raw_output)
                     if i == 0:
                         output_k: np.ndarray = X_i
+                        if isinstance(layer, Convolutional):
+                            output_k = output_k.reshape((batch_size,) + layer.input_shape)
                     else:
                         output_k: np.ndarray = self.layers[i - 1].outputs
+                        if isinstance(self.layers[i - 1], Convolutional): output_k = NeuralNet.flatten(output_k)
+                        if isinstance(layer, Convolutional):
+                            output_k = output_k.reshape(layer.input_shape)
 
                     # update weights
                     weight_decay = 0.01
-                    grad_loss = layer.deltas.T @ output_k / output_k.shape[0]
+                    
+                    if not isinstance(layer, Convolutional): grad_loss = layer.deltas.T @ output_k / batch_size
+                    else:
+                        layer.deltas = layer.deltas.reshape((batch_size, 1) + layer.deltas.shape[1:])
+                        grad_loss = Convolutional.convolve3D(Convolutional.pad(output_k, 1), layer.deltas) / batch_size
+                        print("output k shape: ", Convolutional.pad(output_k, 1).shape, "delta T shape:", layer.deltas.shape)
+                    print("grad loss shape: ", grad_loss.shape)
+                    if i == 0: print(grad_loss)
+
+                    # TODO - LEFT OFF HERE, NEXT GOAL: WE HAVE CORRECT GRAD LOSS, JUST NEED TO FIX ADAMW MESSED UPNESS
+
                     optimized_loss, \
                         layer.weight_momenta, \
                         layer.weight_variances = self.adam_optimize(adam_t,

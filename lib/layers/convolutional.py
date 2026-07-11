@@ -151,9 +151,8 @@ class Convolutional(Layer):
         output = Convolutional.einsum_convolve3D(slices, filters)
 
         # apply biases
-        if biases is None:
-            biases = np.zeros(0)
-        output += biases
+        if biases is not None:
+            output += biases
 
         return output
 
