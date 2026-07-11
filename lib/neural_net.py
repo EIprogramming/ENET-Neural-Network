@@ -1,4 +1,5 @@
 import time
+from typing import Type
 
 import numpy as np
 from sklearn.metrics import accuracy_score
@@ -12,7 +13,7 @@ from layers.new_layer import NewLayer
 import h5py
 
 class NeuralNet:
-    def __init__(self, layers: list[NewLayer], learning_rate: float = 0.01, **kwargs): # TODO: refactor docstring
+    def __init__(self, layers: list[tuple[Type, int]] | list[tuple[Type, tuple, tuple]], learning_rate: float = 0.01, **kwargs): # TODO: refactor docstring
         """Initialize a neural network object.
 
         Parameters
@@ -72,8 +73,40 @@ class NeuralNet:
         for layer in reversed(self.layers):
             self_str += str(layer) + "\n"
         return self_str
+    
+    def create_layers(self, new_layers: list[tuple[Type, int]] | list[tuple[Type, tuple, tuple]]):
+        layers: list[Layer] = []
+        prev_layer_shape: tuple = ()
+        for new_layer in new_layers:
 
-    def create_layers(self, new_layers: list[NewLayer]) -> list[Layer]:
+            new_layer_type = new_layer[0]
+            # for 1D layers
+            if len(new_layer) == 2:
+                new_layer_shape = (new_layer[1],)
+            # for ND layers
+            elif len(new_layer) == 3:
+                new_layer_shape = new_layer[1]
+                new_layer_kernel = new_layer[2]
+            else:
+                raise ValueError(f"Layers must provide either 2 or 3 parametesr")
+
+            if new_layer_type is Dense:
+                prev_layer_shape = (int(np.prod(prev_layer_shape)),) # reset the prev layer shape to one dimensional if it was, e.g. convolutional shape TODO - make this elegant
+                layers.append(Dense(prev_layer_shape[0], new_layer_shape[0], dtype=self.dtype, random_state=self.random_state))
+            elif new_layer_type is Input:
+                pass # we dont need to specify an input layer in this case
+            elif new_layer_type is InputND:
+                layers.append(InputND(new_layer_shape))
+            elif new_layer_type is Convolutional:
+                if (new_layer_shape is None or new_layer_kernel is None):
+                    raise ValueError("Convolutional Layer Gen. Failed")
+                layers.append(Convolutional(new_layer_shape, kernel_params=new_layer_kernel))
+            else:
+                raise ValueError(f"Invalid layer type {new_layer_type}")
+            prev_layer_shape = new_layer_shape
+        return layers
+
+    def create_layers_old(self, new_layers: list[NewLayer]) -> list[Layer]:
         layers: list[Layer] = []
         prev_layer_shape: tuple = ()
         for new_layer in new_layers:
@@ -124,17 +157,8 @@ class NeuralNet:
 
     def predict(self, inputs: np.ndarray, mask=False):
         current_inputs = inputs
-        is_flatten_next_input = False
         for layer in self.layers:
-            # undo flatten need for a second convolution - TODO: make this more elegant
-            if isinstance(layer, Convolutional):
-                is_flatten_next_input = False
-            if is_flatten_next_input: current_inputs = NeuralNet.flatten(current_inputs)
             current_inputs = layer.process(current_inputs, mask)
-
-            # flatten next input for a non-convolutional layer
-            if isinstance(layer, Convolutional):
-                is_flatten_next_input = True
         return current_inputs
 
     def BCE(self, y_pred_all: np.ndarray, y_exp_all: np.ndarray):
@@ -305,10 +329,8 @@ class NeuralNet:
                 # backpropogation
                 for i in reversed(range(len(self.layers))):
                     layer = self.layers[i]
-                    print(i)
                     # for each layer, starting from the last, go through each node and calculate the deltas
                     raw_output = layer.raw_outputs
-                    print("rawoutputshape", raw_output.shape)
                     if i == len(self.layers) - 1:
                         if (layer.activation_method == "softmax" and (self.loss_method == "CE" or self.loss_method == "BCE")):
                             layer.deltas = self.grad_softmax_CE(y_pred, y_exp_i)
@@ -318,32 +340,16 @@ class NeuralNet:
                         # sum along the weights and the previous deltas along their respective axes
                         next_layer = self.layers[i + 1]
                         sum_delta_weights = next_layer.deltas @ next_layer.weights
-                        if not isinstance(layer, Convolutional):
-                            layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
-                        else:
-                            layer.deltas = sum_delta_weights.reshape(raw_output.shape) * layer.activation_derivative(raw_output)
+                        layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
                     if i == 0:
                         output_k: np.ndarray = X_i
-                        if isinstance(layer, Convolutional):
-                            output_k = output_k.reshape((batch_size,) + layer.input_shape)
                     else:
                         output_k: np.ndarray = self.layers[i - 1].outputs
-                        if isinstance(self.layers[i - 1], Convolutional): output_k = NeuralNet.flatten(output_k)
-                        if isinstance(layer, Convolutional):
-                            output_k = output_k.reshape(layer.input_shape)
 
                     # update weights
                     weight_decay = 0.01
                     
-                    if not isinstance(layer, Convolutional): grad_loss = layer.deltas.T @ output_k / batch_size
-                    else:
-                        layer.deltas = layer.deltas.reshape((batch_size, 1) + layer.deltas.shape[1:])
-                        grad_loss = Convolutional.convolve3D(Convolutional.pad(output_k, 1), layer.deltas) / batch_size
-                        print("output k shape: ", Convolutional.pad(output_k, 1).shape, "delta T shape:", layer.deltas.shape)
-                    print("grad loss shape: ", grad_loss.shape)
-                    if i == 0: print(grad_loss)
-
-                    # TODO - LEFT OFF HERE, NEXT GOAL: WE HAVE CORRECT GRAD LOSS, JUST NEED TO FIX ADAMW MESSED UPNESS
+                    grad_loss = layer.deltas.T @ output_k / batch_size
 
                     optimized_loss, \
                         layer.weight_momenta, \
