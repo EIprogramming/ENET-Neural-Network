@@ -2,7 +2,7 @@
 
   
 ## Introduction :)
-ENET is a fully functional feedforward neural network, made by myself "from scratch" (i.e. without using machine learning libraries like PyTorch or copying any code from others/LLMs) using primarily NumPy and matrix mathematics. **Its performance is comparable to feedforward networks of the same structure implemented in PyTorch and TensorFlow.** During testing, ENET consistently achieved ~98% test accuracy within 6 epochs (in 22 seconds on my machine).
+ENET is a fully functional feedforward neural network, made by myself "from scratch" (i.e. without using machine learning libraries like PyTorch or copying any code from others/LLMs) using primarily NumPy and matrix mathematics. **Its performance is comparable to feedforward networks of the same structure implemented in PyTorch and TensorFlow.** During testing, ENET consistently achieved ~98% test accuracy on MNIST digits within 6 epochs (in 22 seconds on my machine).
 
 This was a *highly* enlightening project that I treated above all as an exploratory experience; I watched YouTube videos to get a better understanding, before diving deep into mathematical resources, textbooks, and online resources regarding the math behind backpropagation and neural networks in general.
 
