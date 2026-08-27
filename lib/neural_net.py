@@ -226,7 +226,38 @@ class NeuralNet:
         return X_i, y_i
     
     def noise_normalize(self, X: np.ndarray, mu = 0.05, sigma = 0.05):
-        X += self.rng.normal(mu, sigma, size=X.shape).clip(0, 1)
+        # add some small amount of noise to half of X, randomly
+        mask = self.rng.integers(0, 1, size=X.shape)
+        noise = self.rng.normal(mu, sigma, size=X.shape).clip(0, 1)
+        X += noise * mask
+        return X
+
+    def adamW(self, layer: Layer, adam_t: int, output_k: np.ndarray, batch_size: int):
+        # update weights
+        weight_decay = 0.01
+        
+        grad_loss = layer.deltas.T @ output_k / batch_size
+
+        optimized_loss, \
+            layer.weight_momenta, \
+            layer.weight_variances = self.adam_optimize(adam_t,
+                                                                    grad_loss,
+                                                                    layer.weight_momenta,
+                                                                    layer.weight_variances)
+        # update weights in place
+        layer.weights *= (1 - self.learning_rate * weight_decay)
+        layer.weights -= self.learning_rate * optimized_loss
+        # update biases
+        grad_bias = np.mean(layer.deltas, axis=0)
+        optimized_delta, \
+            layer.bias_momenta, \
+            layer.bias_variances = self.adam_optimize(adam_t, 
+                                                                grad_bias, 
+                                                                layer.bias_momenta,
+                                                                layer.bias_variances)
+        # update biases in place
+        layer.biases *= (1 - self.learning_rate * weight_decay)
+        layer.biases -= self.learning_rate * optimized_delta
 
     def train(self, X: np.ndarray, y_exp: np.ndarray, epochs = 10, batch_size=32, validate = None,
               display=True, lr_scheduling = False, **kwargs):
@@ -248,8 +279,6 @@ class NeuralNet:
 
         # for adam optimization
         adam_t = 0
-        initial_learning_rate = self.learning_rate
-        lr_k = 0.000000230/batch_size # learning rate decay constant factor
 
         for epoch in range(epochs):
             TIMER_epoch = time.time()
@@ -265,7 +294,8 @@ class NeuralNet:
                 # slice a batch of the shuffled X
                 X_i, y_exp_i = NeuralNet.batch(X, y_exp, batch_size, batch_number, num_batches)
 
-                if noise_normalize: self.noise_normalize(X_i)
+                if noise_normalize:
+                    X_i = self.noise_normalize(X_i)
 
                 y_pred = self.predict(X_i, mask=dropout)
 
@@ -292,33 +322,7 @@ class NeuralNet:
                     else:
                         output_k: np.ndarray = self.layers[i - 1].outputs
 
-                    # update weights
-                    weight_decay = 0.01
-                    
-                    grad_loss = layer.deltas.T @ output_k / batch_size
-
-                    optimized_loss, \
-                        layer.weight_momenta, \
-                        layer.weight_variances = self.adam_optimize(adam_t,
-                                                                             grad_loss,
-                                                                             layer.weight_momenta,
-                                                                             layer.weight_variances)
-                    # update weights in place
-                    layer.weights *= (1 - self.learning_rate * weight_decay)
-                    layer.weights -= self.learning_rate * optimized_loss
-                    # update biases
-                    grad_bias = np.mean(layer.deltas, axis=0)
-                    optimized_delta, \
-                        layer.bias_momenta, \
-                        layer.bias_variances = self.adam_optimize(adam_t, 
-                                                                           grad_bias, 
-                                                                           layer.bias_momenta,
-                                                                           layer.bias_variances)
-                    # update biases in place
-                    layer.biases *= (1 - self.learning_rate * weight_decay)
-                    layer.biases -= self.learning_rate * optimized_delta
-                    if lr_scheduling:
-                        self.learning_rate = initial_learning_rate * np.exp(- lr_k * adam_t)
+                    self.adamW(layer, adam_t, output_k, batch_size)
                 
                 loss = self.loss(y_pred, y_exp_i)
                 losses.append(loss)
