@@ -18,7 +18,7 @@ class Dense(Layer):
         self.shape = (n_output, n_input)
 
         # initialize matrix values
-        weight_init_method = kwargs["weight_init"] if "weight_init" in kwargs else "Xavier"
+        weight_init_method = kwargs["init"] if "init" in kwargs else "Xavier"
         self.weights = self.initialize(weight_init_method, **kwargs)
         self.biases = self.bias_initialize("Zero")
 
@@ -34,7 +34,7 @@ class Dense(Layer):
         self.bias_variances = np.zeros_like(self.biases, dtype=self.dtype)
 
         # activation methods
-        self.activation_method = kwargs["activation_method"] if "activation_method" in kwargs else "sigmoid"
+        self.activation_method = kwargs["activation"] if "activation" in kwargs else "sigmoid"
     
     def process(self, input: np.ndarray, mask=False):
         if mask:

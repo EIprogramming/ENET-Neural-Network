@@ -6,14 +6,11 @@ from sklearn.metrics import accuracy_score
 from layers.layer import Layer
 from layers.convolutional import Convolutional
 from layers.dense import Dense
-from layers.input import Input
-from layers.input_nd import InputND
 from layers.layer import Layer
-from layers.new_layer import NewLayer
 import h5py
 
 class NeuralNet:
-    def __init__(self, layers: list[tuple[Type, int]] | list[tuple[Type, tuple, tuple]], learning_rate: float = 0.01, **kwargs): # TODO: refactor docstring
+    def __init__(self, layers: list[Layer] | list[tuple[Type, tuple, tuple]], learning_rate: float = 0.01, **kwargs): # TODO: refactor docstring
         """Initialize a neural network object.
 
         Parameters
@@ -37,8 +34,11 @@ class NeuralNet:
 
         Examples
         --------
-        >>>### OUTDATED TODO NeuralNet((28**2, 256, 10)) # initialize a network with size 784 input layer, 256 hidden layer, and 10 output layer
-        >>>### OUTDATED TODO NeuralNet((2, 16, 2), learning_rate = 0.005, loss_method = "MSE", random_state=42, dtype=np.float32)
+        >>> neural_net = NeuralNet([
+                Dense(28*28, 256, activation="ReLu", init="He"),
+                Dense(256, 10, activation="softmax")],
+                learning_rate=0.001, random_state=42, dtype=np.float32)
+                # initialize a network with size 784 input layer, 256 hidden layer, and 10 output layer
         """
         if len(layers) < 2:
             raise ValueError(f"Neural Network must have an input and output layer.")
@@ -60,7 +60,7 @@ class NeuralNet:
         self.random_state = kwargs["random_state"] if "random_state" in kwargs else None
         self.rng = np.random.default_rng(self.random_state)
 
-        self.layers: list[Layer] = self.create_layers(layers)
+        self.layers: list[Layer] = layers
 
         # initialize math
         self.loss = self.CE
@@ -74,60 +74,6 @@ class NeuralNet:
             self_str += str(layer) + "\n"
         return self_str
     
-    def create_layers(self, new_layers: list[tuple[Type, int]] | list[tuple[Type, tuple, tuple]]):
-        layers: list[Layer] = []
-        prev_layer_shape: tuple = ()
-        for new_layer in new_layers:
-
-            new_layer_type = new_layer[0]
-            # for 1D layers
-            if len(new_layer) == 2:
-                new_layer_shape = (new_layer[1],)
-            # for ND layers
-            elif len(new_layer) == 3:
-                new_layer_shape = new_layer[1]
-                new_layer_kernel = new_layer[2]
-            else:
-                raise ValueError(f"Layers must provide either 2 or 3 parametesr")
-
-            if new_layer_type is Dense:
-                prev_layer_shape = (int(np.prod(prev_layer_shape)),) # reset the prev layer shape to one dimensional if it was, e.g. convolutional shape TODO - make this elegant
-                layers.append(Dense(prev_layer_shape[0], new_layer_shape[0], dtype=self.dtype, random_state=self.random_state))
-            elif new_layer_type is Input:
-                pass # we dont need to specify an input layer in this case
-            elif new_layer_type is InputND:
-                layers.append(InputND(new_layer_shape))
-            elif new_layer_type is Convolutional:
-                if (new_layer_shape is None or new_layer_kernel is None):
-                    raise ValueError("Convolutional Layer Gen. Failed")
-                layers.append(Convolutional(new_layer_shape, kernel_params=new_layer_kernel))
-            else:
-                raise ValueError(f"Invalid layer type {new_layer_type}")
-            prev_layer_shape = new_layer_shape
-        return layers
-
-    def create_layers_old(self, new_layers: list[NewLayer]) -> list[Layer]:
-        layers: list[Layer] = []
-        prev_layer_shape: tuple = ()
-        for new_layer in new_layers:
-            layer_shape = new_layer.shape
-            match new_layer.layer_type:
-                case "Dense":
-                    prev_layer_shape = (int(np.prod(prev_layer_shape)),) # reset the prev layer shape to one dimensional if it was, e.g. convolutional shape TODO - make this elegant
-                    layers.append(Dense(prev_layer_shape[0], layer_shape[0], dtype=self.dtype, random_state=self.random_state))
-                case "Input":
-                    pass # we dont need to specify an input layer in this case
-                case "InputND":
-                    layers.append(InputND(layer_shape))
-                case "Convolutional":
-                    if (new_layer.input_shape is None or new_layer.kernel_params is None):
-                        raise ValueError("Convolutional Layer Gen. Failed")
-                    layers.append(Convolutional(new_layer.input_shape, kernel_params=new_layer.kernel_params))
-                case _:
-                    raise ValueError(f"Invalid layer type {new_layer.layer_type}")
-            prev_layer_shape = layer_shape
-        return layers
-
     def set_loss(self, loss_method):
         """Set the method used for the loss function.
         
@@ -389,7 +335,7 @@ class NeuralNet:
                     X_test = validate[0]
                     y_test = validate[1]
                     y_test_pred = self.predict(X_test)
-                    if ("binary" in kwargs and kwargs["binary"] == True) or ("categorical" in kwargs and kwargs["categorical"] == True):
+                    if ("continuous" not in kwargs or kwargs["binary"] == False):
                         y_test_pred = np.where(y_test_pred >= 0.5, 1, 0)
                     accuracy_train = accuracy_score(y_test_pred, y_test)
                     self.report["accuracy"][epoch] = accuracy_train
