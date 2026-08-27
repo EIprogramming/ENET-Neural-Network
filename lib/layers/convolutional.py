@@ -2,7 +2,7 @@
 
 import numpy as np
 #from layer import Layer
-from layer import Layer
+from layers.layer import Layer
 
 class Convolutional(Layer):
     def __init__(self, input_shape: tuple, kernel_params: tuple[int, int, int, int], **kwargs):

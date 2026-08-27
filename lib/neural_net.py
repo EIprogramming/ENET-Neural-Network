@@ -259,8 +259,36 @@ class NeuralNet:
         layer.biases *= (1 - self.learning_rate * weight_decay)
         layer.biases -= self.learning_rate * optimized_delta
 
+    def backpropogate(self, X_i, y_exp_i, y_pred, adam_t, batch_size):
+        for i in reversed(range(len(self.layers))):
+            layer = self.layers[i]
+            # for each layer, starting from the last, go through each node and calculate the deltas
+            raw_output = layer.raw_outputs
+            if i == len(self.layers) - 1:
+                if (layer.activation_method == "softmax" and (self.loss_method == "CE" or self.loss_method == "BCE")):
+                    layer.deltas = self.grad_softmax_CE(y_pred, y_exp_i)
+                else:
+                    layer.deltas = self.loss_derivative(y_pred, y_exp_i) * layer.activation_derivative(raw_output)
+            else:
+                # sum along the weights and the previous deltas along their respective axes
+                next_layer = self.layers[i + 1]
+                sum_delta_weights = next_layer.deltas @ next_layer.weights
+                layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
+            if i == 0:
+                output_k: np.ndarray = X_i
+            else:
+                output_k: np.ndarray = self.layers[i - 1].outputs
+
+            self.adamW(layer, adam_t, output_k, batch_size)
+
+    def modify_inputs(self, X, **kwargs):
+        noise_normalize = kwargs["noise_normalize"] if "noise_normalize" in kwargs else False
+        if noise_normalize:
+            X = self.noise_normalize(X)
+        return X
+
     def train(self, X: np.ndarray, y_exp: np.ndarray, epochs = 10, batch_size=32, validate = None,
-              display=True, lr_scheduling = False, **kwargs):
+              display=True, **kwargs):
 
         # set parameters:
         noise_normalize = kwargs["noise_normalize"] if "noise_normalize" in kwargs else False
@@ -282,20 +310,20 @@ class NeuralNet:
 
         for epoch in range(epochs):
             TIMER_epoch = time.time()
-            losses = []
             shuffled_indices_epoch = shuffled_indices[epoch]
             X = X[shuffled_indices_epoch]
             y_exp = y_exp[shuffled_indices_epoch]
             
             num_batches = len(X)//batch_size
-            if (len(X) % batch_size) != 0:  num_batches += 1
+            if (len(X) % batch_size) != 0: num_batches += 1
+
+            losses = np.zeros(num_batches)
             # batch_number ranges from 
             for batch_number in range(num_batches):
                 # slice a batch of the shuffled X
                 X_i, y_exp_i = NeuralNet.batch(X, y_exp, batch_size, batch_number, num_batches)
 
-                if noise_normalize:
-                    X_i = self.noise_normalize(X_i)
+                X_i = self.modify_inputs(X_i, noise_normalize=noise_normalize)
 
                 y_pred = self.predict(X_i, mask=dropout)
 
@@ -303,29 +331,9 @@ class NeuralNet:
                 adam_t += 1
 
                 # backpropogation
-                for i in reversed(range(len(self.layers))):
-                    layer = self.layers[i]
-                    # for each layer, starting from the last, go through each node and calculate the deltas
-                    raw_output = layer.raw_outputs
-                    if i == len(self.layers) - 1:
-                        if (layer.activation_method == "softmax" and (self.loss_method == "CE" or self.loss_method == "BCE")):
-                            layer.deltas = self.grad_softmax_CE(y_pred, y_exp_i)
-                        else:
-                            layer.deltas = self.loss_derivative(y_pred, y_exp_i) * layer.activation_derivative(raw_output)
-                    else:
-                        # sum along the weights and the previous deltas along their respective axes
-                        next_layer = self.layers[i + 1]
-                        sum_delta_weights = next_layer.deltas @ next_layer.weights
-                        layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
-                    if i == 0:
-                        output_k: np.ndarray = X_i
-                    else:
-                        output_k: np.ndarray = self.layers[i - 1].outputs
+                self.backpropogate(X_i, y_exp_i, y_pred, adam_t, batch_size)
 
-                    self.adamW(layer, adam_t, output_k, batch_size)
-                
-                loss = self.loss(y_pred, y_exp_i)
-                losses.append(loss)
+                losses[batch_number] = np.mean(self.loss(y_pred, y_exp_i))
             TIMER_epoch = time.time() - TIMER_epoch
 
             # calculate loss
