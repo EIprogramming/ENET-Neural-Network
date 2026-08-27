@@ -9,6 +9,8 @@ from layers.dense import Dense
 from layers.layer import Layer
 import h5py
 
+from layers.flatten import Flatten
+
 class NeuralNet:
     def __init__(self, layers: list[Layer] | list[tuple[Type, tuple, tuple]], learning_rate: float = 0.01, **kwargs): # TODO: refactor docstring
         """Initialize a neural network object.
@@ -259,27 +261,44 @@ class NeuralNet:
         layer.biases *= (1 - self.learning_rate * weight_decay)
         layer.biases -= self.learning_rate * optimized_delta
 
+    def dense_backpropogate(self, i, layer: Dense, X_i, y_exp_i, y_pred, adam_t, batch_size):
+        raw_output = layer.raw_outputs
+        if i == len(self.layers) - 1:
+            if (layer.activation_method == "softmax" and (self.loss_method == "CE" or self.loss_method == "BCE")):
+                layer.deltas = self.grad_softmax_CE(y_pred, y_exp_i)
+            else:
+                layer.deltas = self.loss_derivative(y_pred, y_exp_i) * layer.activation_derivative(raw_output)
+        else:
+            # sum along the weights and the previous deltas along their respective axes
+            next_layer = self.layers[i + 1]
+            if isinstance(next_layer, Dense):
+                sum_delta_weights = next_layer.deltas @ next_layer.weights
+                layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
+            elif isinstance(next_layer, Flatten):
+                sum_delta_weights = next_layer.deltas
+                layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
+        if i == 0:
+            output_k: np.ndarray = X_i
+        else:
+            output_k: np.ndarray = self.layers[i - 1].outputs
+
+        self.adamW(layer, adam_t, output_k, batch_size)
+
+    def flatten_backpropogate(self, i, layer: Flatten, batch_size):
+        # sum along the weights and the previous deltas along their respective axes
+        next_layer = self.layers[i + 1]
+        sum_delta_weights = next_layer.deltas @ next_layer.weights
+        layer.deltas = layer.unflatten(batch_size, sum_delta_weights)
+
     def backpropogate(self, X_i, y_exp_i, y_pred, adam_t, batch_size):
         for i in reversed(range(len(self.layers))):
             layer = self.layers[i]
             # for each layer, starting from the last, go through each node and calculate the deltas
-            raw_output = layer.raw_outputs
-            if i == len(self.layers) - 1:
-                if (layer.activation_method == "softmax" and (self.loss_method == "CE" or self.loss_method == "BCE")):
-                    layer.deltas = self.grad_softmax_CE(y_pred, y_exp_i)
-                else:
-                    layer.deltas = self.loss_derivative(y_pred, y_exp_i) * layer.activation_derivative(raw_output)
-            else:
-                # sum along the weights and the previous deltas along their respective axes
-                next_layer = self.layers[i + 1]
-                sum_delta_weights = next_layer.deltas @ next_layer.weights
-                layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
-            if i == 0:
-                output_k: np.ndarray = X_i
-            else:
-                output_k: np.ndarray = self.layers[i - 1].outputs
-
-            self.adamW(layer, adam_t, output_k, batch_size)
+            if isinstance(layer, Dense):
+                self.dense_backpropogate(i, layer, X_i, y_exp_i, y_pred, adam_t, batch_size)
+            elif isinstance(layer, Flatten):
+                self.flatten_backpropogate(i, layer, batch_size)
+        
 
     def modify_inputs(self, X, **kwargs):
         noise_normalize = kwargs["noise_normalize"] if "noise_normalize" in kwargs else False
