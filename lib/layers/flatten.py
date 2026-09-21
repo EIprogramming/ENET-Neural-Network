@@ -25,8 +25,7 @@ class Flatten(Layer):
         self.raw_outputs = input.reshape(output_shape)
         self.outputs = self.raw_outputs
 
-
         return self.outputs
-    
+
     def process(self, input: np.ndarray, mask = None):
         return self.flatten(input)
