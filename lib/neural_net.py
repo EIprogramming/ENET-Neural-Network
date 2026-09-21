@@ -261,7 +261,7 @@ class NeuralNet:
         layer.biases *= (1 - self.learning_rate * weight_decay)
         layer.biases -= self.learning_rate * optimized_delta
 
-    def dense_backpropogate(self, i, layer: Dense, X_i, y_exp_i, y_pred, adam_t, batch_size):
+    def dense_backpropagate(self, i, layer: Dense, X_i, y_exp_i, y_pred, adam_t, batch_size):
         raw_output = layer.raw_outputs
         if i == len(self.layers) - 1:
             if (layer.activation_method == "softmax" and (self.loss_method == "CE" or self.loss_method == "BCE")):
@@ -284,20 +284,47 @@ class NeuralNet:
 
         self.adamW(layer, adam_t, output_k, batch_size)
 
-    def flatten_backpropogate(self, i, layer: Flatten, batch_size):
+    def flatten_backpropagate(self, i, layer: Flatten, batch_size):
         # sum along the weights and the previous deltas along their respective axes
         next_layer = self.layers[i + 1]
         sum_delta_weights = next_layer.deltas @ next_layer.weights
         layer.deltas = layer.unflatten(batch_size, sum_delta_weights)
 
-    def backpropogate(self, X_i, y_exp_i, y_pred, adam_t, batch_size):
+    def convolutional_backpropagate(self, i, layer: Convolutional, X_i, y_exp_i, y_pred, adam_t, batch_size):
+        raw_output = layer.raw_outputs
+        if i == len(self.layers) - 1:
+            raise NotImplementedError("Convolutional layer as final layer not yet implemented.")
+        else:
+            # sum along the weights and the previous deltas along their respective axes
+            next_layer = self.layers[i + 1]
+            if isinstance(next_layer, Dense):
+                sum_delta_weights = next_layer.deltas @ next_layer.weights
+                print(sum_delta_weights.shape, raw_output.shape)
+                layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
+            elif isinstance(next_layer, Flatten):
+                sum_delta_weights = next_layer.deltas
+                print(sum_delta_weights.shape, raw_output.shape)
+                layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
+                print(layer.deltas.shape)
+                print("Convolved: ", X_i.shape, layer.deltas.shape)
+                layer.convolve3D(layer.pad(X_i.reshape(X_i . shape + (1,)),1), layer.deltas, None, 1, True)
+        if i == 0:
+            output_k: np.ndarray = X_i
+        else:
+            output_k: np.ndarray = self.layers[i - 1].outputs
+            
+        self.adamW(layer, adam_t, output_k, batch_size)
+
+    def backpropagate(self, X_i, y_exp_i, y_pred, adam_t, batch_size):
         for i in reversed(range(len(self.layers))):
             layer = self.layers[i]
             # for each layer, starting from the last, go through each node and calculate the deltas
             if isinstance(layer, Dense):
-                self.dense_backpropogate(i, layer, X_i, y_exp_i, y_pred, adam_t, batch_size)
+                self.dense_backpropagate(i, layer, X_i, y_exp_i, y_pred, adam_t, batch_size)
             elif isinstance(layer, Flatten):
-                self.flatten_backpropogate(i, layer, batch_size)
+                self.flatten_backpropagate(i, layer, batch_size)
+            elif isinstance(layer, Convolutional):
+                self.convolutional_backpropagate(i, layer, X_i, y_exp_i, y_pred, adam_t, batch_size)
         
 
     def modify_inputs(self, X, **kwargs):
@@ -350,7 +377,7 @@ class NeuralNet:
                 adam_t += 1
 
                 # backpropogation
-                self.backpropogate(X_i, y_exp_i, y_pred, adam_t, batch_size)
+                self.backpropagate(X_i, y_exp_i, y_pred, adam_t, batch_size)
 
                 losses[batch_number] = np.mean(self.loss(y_pred, y_exp_i))
             TIMER_epoch = time.time() - TIMER_epoch

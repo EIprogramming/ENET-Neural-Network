@@ -139,7 +139,7 @@ class Convolutional(Layer):
         return np.einsum('nijdwh, ...kwhd -> nijk...', slices, kernels, optimize=True)
 
     @staticmethod
-    def convolve3D(inputs, filters: np.ndarray, biases: np.ndarray | None = None, stride: int = 1):
+    def convolve3D(inputs, filters: np.ndarray, biases: np.ndarray | None = None, stride: int = 1, report=False):
         axes = (1, 2) # apply the slice over the 1st and 2nd axes
         filter_size = filters.shape[2]
 
@@ -147,13 +147,14 @@ class Convolutional(Layer):
         
         # apply the stride
         slices = slices[:, ::stride, ::stride, :, :, :]
-    
+        if report:
+            print("slices shape", slices.shape, filters.shape)
         output = Convolutional.einsum_convolve3D(slices, filters)
 
         # apply biases
         if biases is not None:
             output += biases
-
+        print("output:", output.shape)
         return output
 
     @staticmethod
