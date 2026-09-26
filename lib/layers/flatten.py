@@ -19,13 +19,13 @@ class Flatten(Layer):
         output_shape = (batch_size, ) + self.shape_input
         return output.reshape(output_shape)
 
-    def flatten(self, input: np.ndarray):
-        batch_size = input.shape[0]
+    def flatten(self, inputs: np.ndarray):
+        batch_size = inputs.shape[0]
         output_shape = (batch_size, self.n_output)
-        self.raw_outputs = input.reshape(output_shape)
+        self.raw_outputs = inputs.reshape(output_shape)
         self.outputs = self.raw_outputs
 
         return self.outputs
 
-    def process(self, input: np.ndarray, mask = None):
-        return self.flatten(input)
+    def process(self, inputs: np.ndarray, mask = None):
+        return self.flatten(inputs)

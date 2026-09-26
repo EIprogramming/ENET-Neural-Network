@@ -139,21 +139,28 @@ class Convolutional(Layer):
             The batched convolution of the slices with the kernels.
         """
         
-        return np.einsum('...nijdwh, ...kwhd -> nijk...', slices, kernels, optimize=True)
+        return np.einsum('...nijdwh, ...kwhd -> ...nijk', slices, kernels, optimize=True)
 
     @staticmethod
     def convolve3D(inputs, filters: np.ndarray, biases: np.ndarray | None = None, stride: int = 1, report=False, axes=(1,2)):
         #axes = (1, 2) # apply the slice over the 1st and 2nd axes
         filter_size = filters.shape[-2] # select size of the filter, which is second-last
 
+            #print("###filt: ", filters.shape)
+            #print("###inp: ", inputs.shape)
+            #print("###stride: " ,stride)
+
         slices = np.lib.stride_tricks.sliding_window_view(inputs, (filter_size, filter_size), axis=axes) # type: ignore
         
         # apply the stride
-        slices = slices[:, ::stride, ::stride, :, :, :]
-                #if report:
-                    #print("slices shape", slices.shape, filters.shape)
-        output = Convolutional.einsum_convolve3D(slices, filters)
+            #print("###sli: ", slices.shape)
+        if axes == (1,2): slices = slices[:, ::stride, ::stride, :, :, :]
+        elif axes == (2,3):
+            slices = slices[:, :, ::stride, ::stride, :, :, :]
+            #print("###post-slice: ", slices.shape)
 
+        output = Convolutional.einsum_convolve3D(slices, filters)
+            #print("###Output: ", output.shape)
         # apply biases
         if biases is not None:
             output += biases
