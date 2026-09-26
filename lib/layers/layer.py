@@ -65,7 +65,7 @@ class Layer:
         self.bias_variances = np.zeros_like(self.biases, dtype=self.dtype)
 
         # activation methods
-        self.activation_method = kwargs["activation_method"] if "activation_method" in kwargs else "sigmoid"
+        self.activation_method = kwargs["activation"] if "activation" in kwargs else "sigmoid"
     
     def __str__(self) -> str:
         self_str = ""

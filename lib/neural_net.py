@@ -8,7 +8,6 @@ from layers.convolutional import Convolutional
 from layers.dense import Dense
 from layers.layer import Layer
 import h5py
-
 from layers.flatten import Flatten
 
 class NeuralNet:
@@ -299,21 +298,40 @@ class NeuralNet:
             next_layer = self.layers[i + 1]
             if isinstance(next_layer, Dense):
                 sum_delta_weights = next_layer.deltas @ next_layer.weights
-                print(sum_delta_weights.shape, raw_output.shape)
+                        #print(sum_delta_weights.shape, raw_output.shape)
                 layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
             elif isinstance(next_layer, Flatten):
                 sum_delta_weights = next_layer.deltas
-                print(sum_delta_weights.shape, raw_output.shape)
+                        #print(sum_delta_weights.shape, raw_output.shape)
                 layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
-                print(layer.deltas.shape)
-                print("Convolved: ", X_i.shape, layer.deltas.shape)
-                layer.convolve3D(layer.pad(X_i.reshape(X_i . shape + (1,)),1), layer.deltas, None, 1, True)
         if i == 0:
             output_k: np.ndarray = X_i
         else:
             output_k: np.ndarray = self.layers[i - 1].outputs
+
+        # convert 2D input data to 3D
+        if(len(output_k.shape) == 3):
+            shape_3D = output_k.shape + (1,)
+            output_k = output_k.reshape(shape_3D)
+        output_k = layer.pad(output_k, 1)
+        #print("layer_deltas before:", layer.deltas.shape)
+        #layer.deltas = np.mean(layer.deltas, axis=0)
+        layer.deltas = layer.deltas.reshape((layer.deltas.shape[0],) + (1,) + layer.deltas.shape[1:])
+        
+        output_k = output_k.reshape((output_k.shape[0],) + (1,) + output_k.shape[1:])
+
+        #print("layer_deltas after:", layer.deltas.shape)
+        #print("Convolved: ", output_k.shape, layer.deltas.shape)
+        grad = layer.convolve3D(output_k, layer.deltas, None, 1, True, axes=(2,3))
+        #print("Grad: ", grad.shape)
+        grad_avg = np.mean(grad, axis=(-1))
+       # grad_avg = grad_avg.reshape((1,) + grad_avg.shape)
+        #print("grad_avg: ", grad_avg.shape)
+        #print("kernels: ", layer.kernels.shape, f"\n{"-"*16}")
+        #print(np.sum(layer.kernels))
+        layer.kernels -= self.learning_rate * grad_avg
             
-        self.adamW(layer, adam_t, output_k, batch_size)
+        #self.adamW(layer, adam_t, output_k, batch_size)
 
     def backpropagate(self, X_i, y_exp_i, y_pred, adam_t, batch_size):
         for i in reversed(range(len(self.layers))):

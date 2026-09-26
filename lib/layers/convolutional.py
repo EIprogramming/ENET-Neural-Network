@@ -27,7 +27,7 @@ class Convolutional(Layer):
         self._init_super(input_shape, self.output_shape, **kwargs)
 
         self._init_input_parameters(input_shape)
-        self._init_neural_parameters()
+        self._init_neural_parameters(**kwargs)
         self._init_adam_parameters()
         print(f"Convolution layer successfully created with kernel params (K, F, S, P): {kernel_params}")
 
@@ -62,7 +62,7 @@ class Convolutional(Layer):
         self.stride = S
         self.padding = P
 
-    def _init_neural_parameters(self):
+    def _init_neural_parameters(self, **kwargs):
         K = self.kernel_num
         F = self.filter_size
         D1 = self.input_depth
@@ -70,9 +70,12 @@ class Convolutional(Layer):
         # create K filters of shape FxFxD1
         self.kernels = np.zeros((K, F, F, D1))
         self.shape = (K, F, F, D1)
+        self._initialize_weights(**kwargs)
+
         self.weights = self.kernels.ravel() # provides a flattened view of kernels
         self.deltas = np.zeros_like(self.weights)
         self.biases = np.zeros(K)
+
     
     def _init_adam_parameters(self):
         self.weight_momenta = np.zeros_like(self.weights, dtype=self.dtype)
@@ -96,9 +99,9 @@ class Convolutional(Layer):
         output_shape_flattened = sum(output_shape)
         super().__init__(input_shape_flattened, output_shape_flattened, **kwargs) # TODO: fix inheritance
 
-    def initialize_weights(self, init_method: str):
-        # TODO: incorporate into __init__
-        self.weights = self.initialize(init_method)
+    def _initialize_weights(self, **kwargs):
+        weight_init_method = kwargs["init"] if "init" in kwargs else "Xavier"
+        self.weights = self.initialize(weight_init_method)
         self.kernels = self.weights.reshape(self.kernels.shape)
     
     @staticmethod
@@ -136,25 +139,25 @@ class Convolutional(Layer):
             The batched convolution of the slices with the kernels.
         """
         
-        return np.einsum('nijdwh, ...kwhd -> nijk...', slices, kernels, optimize=True)
+        return np.einsum('...nijdwh, ...kwhd -> nijk...', slices, kernels, optimize=True)
 
     @staticmethod
-    def convolve3D(inputs, filters: np.ndarray, biases: np.ndarray | None = None, stride: int = 1, report=False):
-        axes = (1, 2) # apply the slice over the 1st and 2nd axes
-        filter_size = filters.shape[2]
+    def convolve3D(inputs, filters: np.ndarray, biases: np.ndarray | None = None, stride: int = 1, report=False, axes=(1,2)):
+        #axes = (1, 2) # apply the slice over the 1st and 2nd axes
+        filter_size = filters.shape[-2] # select size of the filter, which is second-last
 
         slices = np.lib.stride_tricks.sliding_window_view(inputs, (filter_size, filter_size), axis=axes) # type: ignore
         
         # apply the stride
         slices = slices[:, ::stride, ::stride, :, :, :]
-        if report:
-            print("slices shape", slices.shape, filters.shape)
+                #if report:
+                    #print("slices shape", slices.shape, filters.shape)
         output = Convolutional.einsum_convolve3D(slices, filters)
 
         # apply biases
         if biases is not None:
             output += biases
-        print("output:", output.shape)
+                #print("output:", output.shape)
         return output
 
     @staticmethod

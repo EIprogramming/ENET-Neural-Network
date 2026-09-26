@@ -1,4 +1,13 @@
+import time
+
 import numpy as np
+
+# for imports
+import sys
+
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+# end for imports
 
 from convolutional import Convolutional
 
@@ -33,3 +42,7 @@ def test1():
 
 def test_convolutional():
     test1()
+    print("Tests Completed.")
+
+test_convolutional()
+
