@@ -323,7 +323,7 @@ class NeuralNet:
 
         # internally pad deltas for greater stride
         if layer.stride > 1:
-            dilation_factor = layer.stride - 1
+            dilation_factor = layer.stride -1
             width = deltas.shape[2]
             height = deltas.shape[3]
             padded_deltas_shape = (deltas.shape[0:2]) +(deltas.shape[2] + dilation_factor,
@@ -346,15 +346,15 @@ class NeuralNet:
             
             # PAD ONLY FOR DELTAS, NOT GRADIENT => see part 1 / part 2
                 #padded_deltas = Convolutional.pad(padded_deltas, layer.stride)
-            print("final shape: ", padded_deltas.shape, "prev shape: ", padded_deltas_shape, "original shape: ", deltas.shape)
+            #print("final shape: ", padded_deltas.shape, "prev shape: ", padded_deltas_shape, "original shape: ", deltas.shape)
             deltas = padded_deltas
         # apply internal stride padding on deltas
-        print("Convolved: ", output_k.shape, deltas.shape)
+        #print("Convolved: ", output_k.shape, deltas.shape)
 
         grad = layer.convolve3D(output_k, deltas, None, 1, True, axes=(2,3))
         grad = grad.reshape((grad.shape[0],) + grad.shape[1:][::-1])
         
-        print("Grad: ", grad.shape)
+        #print("Grad: ", grad.shape)
         grad_avg = np.mean(grad, axis=(0))
             #print("grad_avg: ", grad_avg.shape)
             #print("kernels: ", layer.kernels.shape, f"\n{"-"*16}")
