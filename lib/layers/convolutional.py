@@ -173,6 +173,8 @@ class Convolutional(Layer):
         # create a tuple of tuples that ensures that only the middle two dimensions of the input are zero padded
         if len(inputs.shape) == 4:
             padding_shape = ((0, 0), (padding, padding), (padding, padding), (0, 0))
+        elif len(inputs.shape) == 5:
+            padding_shape = ((0,0), (0, 0), (padding, padding), (padding, padding), (0, 0))
         else:
             raise ValueError(f"Input array must be 4 dimensional, got shape: {inputs.shape}")
         return np.pad(inputs, padding_shape)

@@ -315,15 +315,46 @@ class NeuralNet:
             output_k = output_k.reshape(shape_3D)
         output_k = layer.pad(output_k, 1)
             #print("layer_deltas before:", layer.deltas.shape)
-        layer.deltas = layer.deltas.reshape((layer.deltas.shape[0], layer.deltas.shape[-1]) + layer.deltas.shape[1:-1] + (1,))
+        deltas = layer.deltas.reshape((layer.deltas.shape[0], layer.deltas.shape[-1]) + layer.deltas.shape[1:-1] + (1,))
         
         output_k = output_k.reshape((output_k.shape[0],) + (1,) + output_k.shape[1:])
 
             #print("layer_deltas after:", layer.deltas.shape)
-            #print("Convolved: ", output_k.shape, layer.deltas.shape)
-        grad = layer.convolve3D(output_k, layer.deltas, None, layer.stride, True, axes=(2,3))
+
+        # internally pad deltas for greater stride
+        if layer.stride > 1:
+            dilation_factor = layer.stride - 1
+            width = deltas.shape[2]
+            height = deltas.shape[3]
+            padded_deltas_shape = (deltas.shape[0:2]) +(deltas.shape[2] + dilation_factor,
+                                                        deltas.shape[3] + dilation_factor) + deltas.shape[4:]
+            padded_deltas = np.zeros(padded_deltas_shape)
+            upper_half = np.array(np.split(np.split(deltas, 2, axis=-2)[0], 2, axis=-3))
+            lower_half = np.array(np.split(np.split(deltas, 2, axis=-2)[1], 2, axis=-3))
+    
+
+            upper_left = upper_half[0]
+            upper_right = upper_half[1]
+            lower_left = lower_half[0]
+            lower_right = lower_half[1]
+
+            padded_deltas[:, :, 0:width//2, 0:height//2, :] = upper_left
+            padded_deltas[:, :, width//2 + dilation_factor:, 0:height//2, :] = upper_right
+            padded_deltas[:, :, 0:width//2, height//2 + dilation_factor:, :] = lower_left
+            padded_deltas[:, :, width//2 + dilation_factor:, height//2 + dilation_factor:, :] = lower_right
+            #windows = np.lib.stride_tricks.sliding_window_view(deltas, windows_shape, )
+            
+            # PAD ONLY FOR DELTAS, NOT GRADIENT => see part 1 / part 2
+                #padded_deltas = Convolutional.pad(padded_deltas, layer.stride)
+            print("final shape: ", padded_deltas.shape, "prev shape: ", padded_deltas_shape, "original shape: ", deltas.shape)
+            deltas = padded_deltas
+        # apply internal stride padding on deltas
+        print("Convolved: ", output_k.shape, deltas.shape)
+
+        grad = layer.convolve3D(output_k, deltas, None, 1, True, axes=(2,3))
         grad = grad.reshape((grad.shape[0],) + grad.shape[1:][::-1])
-            #print("Grad: ", grad.shape)
+        
+        print("Grad: ", grad.shape)
         grad_avg = np.mean(grad, axis=(0))
             #print("grad_avg: ", grad_avg.shape)
             #print("kernels: ", layer.kernels.shape, f"\n{"-"*16}")
