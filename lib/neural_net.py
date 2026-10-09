@@ -313,7 +313,7 @@ class NeuralNet:
         if(len(output_k.shape) == 3):
             shape_3D = output_k.shape + (1,)
             output_k = output_k.reshape(shape_3D)
-        output_k = layer.pad(output_k, 1)
+        if layer.padding > 0: output_k = layer.pad(output_k, layer.padding)
             #print("layer_deltas before:", layer.deltas.shape)
         deltas = layer.deltas.reshape((layer.deltas.shape[0], layer.deltas.shape[-1]) + layer.deltas.shape[1:-1] + (1,))
         
@@ -323,7 +323,8 @@ class NeuralNet:
 
         # internally pad deltas for greater stride
         if layer.stride > 1:
-            dilation_factor = layer.stride -1
+            dilation_factor = deltas.shape[-2] # make the dilation factor equal to shape of output
+            #print(dilation_factor, output_k.shape, deltas.shape)
             width = deltas.shape[2]
             height = deltas.shape[3]
             padded_deltas_shape = (deltas.shape[0:2]) +(deltas.shape[2] + dilation_factor,
@@ -345,16 +346,18 @@ class NeuralNet:
             #windows = np.lib.stride_tricks.sliding_window_view(deltas, windows_shape, )
             
             # PAD ONLY FOR DELTAS, NOT GRADIENT => see part 1 / part 2
-                #padded_deltas = Convolutional.pad(padded_deltas, layer.stride)
-            #print("final shape: ", padded_deltas.shape, "prev shape: ", padded_deltas_shape, "original shape: ", deltas.shape)
+                #output_deltas = Convolutional.pad(padded_deltas, layer.filter_size - 1)
+                #print("final shape: ", output_deltas.shape, "prev shape: ", padded_deltas_shape, "original shape: ", deltas.shape)
+            
             deltas = padded_deltas
+
         # apply internal stride padding on deltas
-        #print("Convolved: ", output_k.shape, deltas.shape)
+            #print("Convolved: ", output_k.shape, deltas.shape)
 
         grad = layer.convolve3D(output_k, deltas, None, 1, True, axes=(2,3))
         grad = grad.reshape((grad.shape[0],) + grad.shape[1:][::-1])
         
-        #print("Grad: ", grad.shape)
+            #print("Grad: ", grad.shape)
         grad_avg = np.mean(grad, axis=(0))
             #print("grad_avg: ", grad_avg.shape)
             #print("kernels: ", layer.kernels.shape, f"\n{"-"*16}")
