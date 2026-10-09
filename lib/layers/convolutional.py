@@ -184,7 +184,11 @@ class Convolutional(Layer):
         batch_shape = (batch_size,) + self.input_shape
         inputs_reshaped = inputs.reshape(batch_shape)
         return inputs_reshaped
-    
+
+    @staticmethod
+    def rotate_filters(filters: np.ndarray):
+        rotated_filters = np.flip(filters, (1,2))
+        return rotated_filters
 
     def process(self, inputs: np.ndarray, mask=False): # TODO: add masking (very late in the project)
         inputs_reshaped = self.reshape(inputs)

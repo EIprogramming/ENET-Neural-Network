@@ -296,13 +296,14 @@ class NeuralNet:
         else:
             # sum along the weights and the previous deltas along their respective axes
             next_layer = self.layers[i + 1]
+            if isinstance(next_layer, Convolutional):
+                raw_output = Convolutional.pad(raw_output, next_layer.padding)
+                layer.deltas = next_layer.deltas * layer.activation_derivative(raw_output)
             if isinstance(next_layer, Dense):
                 sum_delta_weights = next_layer.deltas @ next_layer.weights
-                        #print(sum_delta_weights.shape, raw_output.shape)
                 layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
             elif isinstance(next_layer, Flatten):
                 sum_delta_weights = next_layer.deltas
-                        #print(sum_delta_weights.shape, raw_output.shape)
                 layer.deltas = sum_delta_weights * layer.activation_derivative(raw_output)
         if i == 0:
             output_k: np.ndarray = X_i
@@ -313,59 +314,50 @@ class NeuralNet:
         if(len(output_k.shape) == 3):
             shape_3D = output_k.shape + (1,)
             output_k = output_k.reshape(shape_3D)
-        if layer.padding > 0: output_k = layer.pad(output_k, layer.padding)
-            #print("layer_deltas before:", layer.deltas.shape)
-        deltas = layer.deltas.reshape((layer.deltas.shape[0], layer.deltas.shape[-1]) + layer.deltas.shape[1:-1] + (1,))
-        
+        if layer.padding > 0:
+            output_k = layer.pad(output_k, layer.padding)
+        deltas = np.expand_dims(layer.deltas, 1)
+        deltas_gradient = deltas
         output_k = output_k.reshape((output_k.shape[0],) + (1,) + output_k.shape[1:])
-
-            #print("layer_deltas after:", layer.deltas.shape)
 
         # internally pad deltas for greater stride
         if layer.stride > 1:
-            dilation_factor = deltas.shape[-2] # make the dilation factor equal to shape of output
-            #print(dilation_factor, output_k.shape, deltas.shape)
-            width = deltas.shape[2]
-            height = deltas.shape[3]
-            padded_deltas_shape = (deltas.shape[0:2]) +(deltas.shape[2] + dilation_factor,
-                                                        deltas.shape[3] + dilation_factor) + deltas.shape[4:]
-            padded_deltas = np.zeros(padded_deltas_shape)
-            upper_half = np.array(np.split(np.split(deltas, 2, axis=-2)[0], 2, axis=-3))
-            lower_half = np.array(np.split(np.split(deltas, 2, axis=-2)[1], 2, axis=-3))
-    
-
-            upper_left = upper_half[0]
-            upper_right = upper_half[1]
-            lower_left = lower_half[0]
-            lower_right = lower_half[1]
-
-            padded_deltas[:, :, 0:width//2, 0:height//2, :] = upper_left
-            padded_deltas[:, :, width//2 + dilation_factor:, 0:height//2, :] = upper_right
-            padded_deltas[:, :, 0:width//2, height//2 + dilation_factor:, :] = lower_left
-            padded_deltas[:, :, width//2 + dilation_factor:, height//2 + dilation_factor:, :] = lower_right
-            #windows = np.lib.stride_tricks.sliding_window_view(deltas, windows_shape, )
-            
-            # PAD ONLY FOR DELTAS, NOT GRADIENT => see part 1 / part 2
-                #output_deltas = Convolutional.pad(padded_deltas, layer.filter_size - 1)
-                #print("final shape: ", output_deltas.shape, "prev shape: ", padded_deltas_shape, "original shape: ", deltas.shape)
-            
-            deltas = padded_deltas
-
-        # apply internal stride padding on deltas
-            #print("Convolved: ", output_k.shape, deltas.shape)
-
-        grad = layer.convolve3D(output_k, deltas, None, 1, True, axes=(2,3))
+            deltas_gradient = NeuralNet.dilate(deltas, deltas.shape[-2])
+            output_deltas = Convolutional.pad(deltas_gradient, layer.filter_size - 1)
+            rotated_filters = Convolutional.rotate_filters(layer.kernels)
+            layer.deltas = layer.convolve3D(output_deltas, rotated_filters, None, 1, True, axes=(2,3))
+            layer.deltas = np.squeeze(layer.deltas, 1)
+        grad = layer.convolve3D(output_k, deltas_gradient, None, 1, True, axes=(2,3))
         grad = grad.reshape((grad.shape[0],) + grad.shape[1:][::-1])
         
-            #print("Grad: ", grad.shape)
         grad_avg = np.mean(grad, axis=(0))
-            #print("grad_avg: ", grad_avg.shape)
-            #print("kernels: ", layer.kernels.shape, f"\n{"-"*16}")
-            #print(np.sum(layer.kernels))
         layer.kernels -= self.learning_rate * grad_avg
             
         #self.adamW(layer, adam_t, output_k, batch_size)
+    @staticmethod
+    def dilate(deltas, dilation_factor):
+        #print(dilation_factor, output_k.shape, deltas.shape)
+        width = deltas.shape[2]
+        height = deltas.shape[3]
+        padded_deltas_shape = (deltas.shape[0:2]) +(deltas.shape[2] + dilation_factor,
+                                                    deltas.shape[3] + dilation_factor) + deltas.shape[4:]
+        padded_deltas = np.zeros(padded_deltas_shape)
+        upper_half = np.array(np.split(np.split(deltas, 2, axis=-2)[0], 2, axis=-3))
+        lower_half = np.array(np.split(np.split(deltas, 2, axis=-2)[1], 2, axis=-3))
 
+
+        upper_left = upper_half[0]
+        upper_right = upper_half[1]
+        lower_left = lower_half[0]
+        lower_right = lower_half[1]
+
+        padded_deltas[:, :, 0:width//2, 0:height//2, :] = upper_left
+        padded_deltas[:, :, width//2 + dilation_factor:, 0:height//2, :] = upper_right
+        padded_deltas[:, :, 0:width//2, height//2 + dilation_factor:, :] = lower_left
+        padded_deltas[:, :, width//2 + dilation_factor:, height//2 + dilation_factor:, :] = lower_right
+
+        return padded_deltas
+    
     def backpropagate(self, X_i, y_exp_i, y_pred, adam_t, batch_size):
         for i in reversed(range(len(self.layers))):
             layer = self.layers[i]
